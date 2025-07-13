@@ -88,6 +88,9 @@ class FilingCode(Base):
     # Relationship to file_code_labels
     file_labels = relationship("FileCodeLabel", back_populates="filing_code")
 
+    # Relationship to code_centroids
+    centroid = relationship("CodeCentroid", back_populates="filing_code", uselist=False, cascade="all, delete-orphan", single_parent=True)
+
 class FileCodeLabel(Base):
     """
     Labels connecting files to filing codes.
@@ -137,18 +140,48 @@ class FileEmbedding(Base):
       USING ivfflat (mpnet_emb vector_cosine_ops)  WITH (lists = 100);
     """
     __tablename__ = 'file_embeddings'
+    __table_args__ = (
+        Index('ix_file_embeddings_minilm_emb', 'minilm_emb', 
+              postgresql_using='ivfflat', 
+              postgresql_ops={'minilm_emb': 'vector_cosine_ops'}, 
+              postgresql_with={'lists': 100}),
+        Index('ix_file_embeddings_mpnet_emb', 'mpnet_emb', 
+              postgresql_using='ivfflat', 
+              postgresql_ops={'mpnet_emb': 'vector_cosine_ops'}, 
+              postgresql_with={'lists': 100}),
+    )
     
     file_id = Column(Integer, ForeignKey('files.id'), primary_key=True)
     source_text = Column(Text)
-    minilm_model = Column(Text, default='all-MiniLM-L6-v2')
+    minilm_model = Column(Text)
     minilm_emb = Column(VECTOR(384))
     mpnet_model = Column(Text)
     mpnet_emb = Column(VECTOR(768))
-    updated_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
     # Relationship
     file = relationship("File", back_populates="embedding")
 
-# Create indexes for vector columns
-Index('ix_file_embeddings_minilm_emb', FileEmbedding.minilm_emb, postgresql_using='ivfflat', postgresql_ops={'minilm_emb': 'vector_cosine_ops'}, postgresql_with={'lists': 100})
-Index('ix_file_embeddings_mpnet_emb', FileEmbedding.mpnet_emb, postgresql_using='ivfflat', postgresql_ops={'mpnet_emb': 'vector_cosine_ops'}, postgresql_with={'lists': 100})
+class CodeCentroid(Base):
+    """
+    Code centroids for storing average embeddings per filing code.
+    
+    PostgreSQL equivalent:
+    CREATE TABLE code_centroids (
+      code            TEXT PRIMARY KEY REFERENCES filing_codes(code),
+      model_name      TEXT,            -- 'all-MiniLM-L6-v2'
+      emb_avg         VECTOR(),        -- variable size for vectors of different models
+      doc_count       INTEGER,
+      updated_at      TIMESTAMPTZ DEFAULT now()
+    );
+    """
+    __tablename__ = 'code_centroids'
+    
+    code = Column(Text, ForeignKey('filing_codes.code'), primary_key=True)
+    model_name = Column(Text)
+    emb_avg = Column(VECTOR())
+    doc_count = Column(Integer)
+    updated_at = Column(DateTime, default=func.now())
+    
+    # Relationship
+    filing_code = relationship("FilingCode", back_populates="centroid")

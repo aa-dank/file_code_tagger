@@ -24,7 +24,8 @@ class File(Base):
     
     id = Column(Integer, primary_key=True)
     size = Column(BigInteger)
-    hash = Column(String)
+    hash = Column(String,
+                  comment="SHA1 File hash for integrity checks.")
     extension = Column(String)
     
     # Relationship to file_locations
@@ -107,20 +108,30 @@ class FileTagLabel(Base):
     CREATE TABLE file_tag_labels (
       file_id       INTEGER REFERENCES files(id),
       tag           TEXT    REFERENCES filing_tags(label),
-      is_primary    BOOLEAN DEFAULT TRUE,   -- leaf vs ancestor tag
-      label_source  TEXT    DEFAULT 'human',-- 'human', 'rule', 'model'
-      split         TEXT    DEFAULT 'train',-- 'train', 'test', 'val'
+      is_primary   BOOLEAN DEFAULT TRUE,   -- leaf vs ancestor tag 
+      label_source  TEXT,                     -- 'human', 'rule', 'model'
+      split         TEXT,                     -- 'train', 'test', 'val'
       PRIMARY KEY (file_id, tag)
     );
     """
     __tablename__ = 'file_tag_labels'
 
-    file_id = Column(Integer, ForeignKey('files.id'), primary_key=True)
-    tag = Column(Text, ForeignKey('filing_tags.label'), primary_key=True)
-    is_primary = Column(Boolean, default=True)
-    label_source = Column(Text, default='human')
-    split = Column(Text, default='train')
-    
+    file_id = Column(Integer, ForeignKey('files.id'),
+                     primary_key=True,
+                     comment="File ID - primary key from files table.")
+    tag = Column(Text, ForeignKey('filing_tags.label'),
+                 primary_key=True,
+                 comment="Filing tag label. This is a foreign key to the filing_tags table.")
+    is_primary = Column(Boolean,
+                        default=True,
+                        comment = "Leaf vs ancestor tag (primary = leaf) - distinguishes 'explicitly assigned leaf tag' from 'inherited parent tag.'")
+    label_source = Column(Text,
+                          default='human',
+                          comment = "Source of the label - 'human', 'rule', 'model'")
+    split = Column(Text,
+                   default='train',
+                   comment = "Data split - 'train', 'test', 'val'")
+
     # Relationships
     file = relationship("File", back_populates="tag_labels")
     filing_tag = relationship("FilingTag", back_populates="file_labels")
@@ -215,6 +226,8 @@ class TagPrototype(Base):
     embedding    = Column(VECTOR(), nullable=False)  # any dimension
     doc_count    = Column(Integer)
     updated_at   = Column(DateTime, server_default=func.now())
+    notes        = Column(Text,
+                          comment="Optional notes about the prototype.")
 
     # ORM back-ref
     filing_tag = relationship("FilingTag", back_populates="prototypes")

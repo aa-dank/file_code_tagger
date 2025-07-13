@@ -1,6 +1,6 @@
 # Database Models
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, Text, Boolean, Numeric, Index
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, SmallInteger, Text, Boolean, Numeric, Index, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import VECTOR
@@ -34,6 +34,7 @@ class File(Base):
     # Relationship to file_embeddings
     embedding = relationship("FileEmbedding", back_populates="file", uselist=False, cascade="all, delete-orphan")
 
+
 class FileLocation(Base):
     """
     File locations table tracking where files are stored.
@@ -59,6 +60,7 @@ class FileLocation(Base):
     
     # Relationship to files
     file = relationship("File", back_populates="locations")
+
 
 class FilingTag(Base):
     """
@@ -88,8 +90,14 @@ class FilingTag(Base):
     # Relationship to file_tag_labels
     file_labels = relationship("FileTagLabel", back_populates="filing_tag")
 
-    # Relationship to tag_centroids
-    centroid = relationship("TagCentroid", back_populates="filing_tag", uselist=False, cascade="all, delete-orphan")
+    prototypes = relationship(
+        "TagPrototype",
+        back_populates="filing_tag",
+        cascade="all, delete-orphan",
+        single_parent=True,   # guarantees a prototype row can’t be re-parented
+        order_by="TagPrototype.prototype_id",
+    )
+
 
 class FileTagLabel(Base):
     """
@@ -117,9 +125,10 @@ class FileTagLabel(Base):
     file = relationship("File", back_populates="tag_labels")
     filing_tag = relationship("FilingTag", back_populates="file_labels")
 
+
 class FileEmbedding(Base):
     """
-    File embeddings for vector similarity search.
+    File embeddings for semantic distance search.
     
     PostgreSQL equivalent:
     CREATE TABLE file_embeddings (
@@ -162,26 +171,50 @@ class FileEmbedding(Base):
     # Relationship
     file = relationship("File", back_populates="embedding")
 
-class TagCentroid(Base):
+
+class TagPrototype(Base):
     """
-    Tag centroids for storing average embeddings per filing tag.
+    A prototype embedding for a filing tag.
+    prototype_id = 0  → global centroid
+                  >0 → sub-cluster or learned prototype
     
     PostgreSQL equivalent:
-    CREATE TABLE tag_centroids (
-      tag             TEXT PRIMARY KEY REFERENCES filing_tags(label),
-      model_name      TEXT,            -- 'all-MiniLM-L6-v2'
-      emb_avg         VECTOR(384),
-      doc_count       INTEGER,
-      updated_at      TIMESTAMPTZ DEFAULT now()
+    CREATE TABLE tag_prototypes (
+      tag           TEXT REFERENCES filing_tags(label) ON DELETE CASCADE,
+      prototype_id  SMALLINT DEFAULT 0,     -- 0 = centroid
+      model_name    TEXT NOT NULL,
+      embedding     VECTOR() NOT NULL,      -- any dimension
+      doc_count     INTEGER,
+      updated_at    TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (tag, prototype_id)
     );
+    
+    -- Index for ANN search
+    CREATE INDEX ix_tag_prototypes_embedding ON tag_prototypes
+      USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
     """
-    __tablename__ = 'tag_centroids'
-    
-    tag = Column(Text, ForeignKey('filing_tags.label'), primary_key=True)
-    model_name = Column(Text)
-    emb_avg = Column(VECTOR(384))
-    doc_count = Column(Integer)
-    updated_at = Column(DateTime, default=func.now())
-    
-    # Relationship
-    filing_tag = relationship("FilingTag", back_populates="centroid")
+    __tablename__ = "tag_prototypes"
+    __table_args__ = (
+        # fast ANN search when you want to query prototypes directly
+        Index(
+            "ix_tag_prototypes_embedding",
+            "embedding",
+            postgresql_using="ivfflat",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+            postgresql_with={"lists": 100},
+        ),
+    )
+
+    tag = Column(
+        Text,
+        ForeignKey("filing_tags.label", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    prototype_id = Column(SmallInteger, primary_key=True, default=0)  # 0 = centroid
+    model_name   = Column(Text, nullable=False)
+    embedding    = Column(VECTOR(), nullable=False)  # any dimension
+    doc_count    = Column(Integer)
+    updated_at   = Column(DateTime, server_default=func.now())
+
+    # ORM back-ref
+    filing_tag = relationship("FilingTag", back_populates="prototypes")

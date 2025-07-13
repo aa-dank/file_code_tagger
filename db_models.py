@@ -29,8 +29,8 @@ class File(Base):
     
     # Relationship to file_locations
     locations = relationship("FileLocation", back_populates="file", cascade="all, delete-orphan")
-    # Relationship to file_code_labels
-    code_labels = relationship("FileCodeLabel", back_populates="file", cascade="all, delete-orphan")
+    # Relationship to file_tag_labels
+    tag_labels = relationship("FileTagLabel", back_populates="file", cascade="all, delete-orphan")
     # Relationship to file_embeddings
     embedding = relationship("FileEmbedding", back_populates="file", uselist=False, cascade="all, delete-orphan")
 
@@ -60,62 +60,62 @@ class FileLocation(Base):
     # Relationship to files
     file = relationship("File", back_populates="locations")
 
-class FilingCode(Base):
+class FilingTag(Base):
     """
-    Filing codes for categorizing files.
-    
+    Filing tags for categorizing files.
+
     PostgreSQL equivalent:
-    CREATE TABLE filing_codes (
-      code              TEXT  PRIMARY KEY,      -- 'F7.1'
-      parent_code       TEXT REFERENCES filing_codes(code),
+    CREATE TABLE filing_tags (
+      label              TEXT  PRIMARY KEY,      -- 'F7.1'
+      parent_label       TEXT REFERENCES filing_tags(label),
       description       TEXT,
       importance_rank   INTEGER,               -- 1 = very important
-      confidence_floor  NUMERIC DEFAULT 0.60   -- per-code threshold
+      confidence_floor  NUMERIC DEFAULT 0.60   -- per-label threshold
     );
     """
-    __tablename__ = 'filing_codes'
-    
-    code = Column(Text, primary_key=True)
-    parent_code = Column(Text, ForeignKey('filing_codes.code'))
+    __tablename__ = 'filing_tags'
+
+    label = Column(Text, primary_key=True)
+    parent_label = Column(Text, ForeignKey('filing_tags.label'))
     description = Column(Text)
     importance_rank = Column(Integer)
     confidence_floor = Column(Numeric, default=0.60)
     
     # Self-referential relationship
-    parent = relationship("FilingCode", remote_side=[code], back_populates="children")
-    children = relationship("FilingCode", back_populates="parent")
-    
-    # Relationship to file_code_labels
-    file_labels = relationship("FileCodeLabel", back_populates="filing_code")
+    parent = relationship("FilingTag", remote_side=[label], back_populates="children")
+    children = relationship("FilingTag", back_populates="parent")
 
-    # Relationship to code_centroids
-    centroid = relationship("CodeCentroid", back_populates="filing_code", uselist=False, cascade="all, delete-orphan", single_parent=True)
+    # Relationship to file_tag_labels
+    file_labels = relationship("FileTagLabel", back_populates="filing_tag")
 
-class FileCodeLabel(Base):
+    # Relationship to tag_centroids
+    centroid = relationship("TagCentroid", back_populates="filing_tag", uselist=False, cascade="all, delete-orphan")
+
+class FileTagLabel(Base):
     """
-    Labels connecting files to filing codes.
-    
+    Labels connecting files to filing tags.
+
     PostgreSQL equivalent:
-    CREATE TABLE file_code_labels (
+    CREATE TABLE file_tag_labels (
       file_id       INTEGER REFERENCES files(id),
-      code          TEXT    REFERENCES filing_codes(code),
+      tag           TEXT    REFERENCES filing_tags(label),
       is_primary    BOOLEAN DEFAULT TRUE,   -- leaf vs ancestor tag
       label_source  TEXT    DEFAULT 'human',-- 'human', 'rule', 'model'
       split         TEXT    DEFAULT 'train',-- 'train', 'test', 'val'
-      PRIMARY KEY (file_id, code)
+      PRIMARY KEY (file_id, tag)
     );
     """
-    __tablename__ = 'file_code_labels'
-    
+    __tablename__ = 'file_tag_labels'
+
     file_id = Column(Integer, ForeignKey('files.id'), primary_key=True)
-    code = Column(Text, ForeignKey('filing_codes.code'), primary_key=True)
+    tag = Column(Text, ForeignKey('filing_tags.label'), primary_key=True)
     is_primary = Column(Boolean, default=True)
     label_source = Column(Text, default='human')
     split = Column(Text, default='train')
     
     # Relationships
-    file = relationship("File", back_populates="code_labels")
-    filing_code = relationship("FilingCode", back_populates="file_labels")
+    file = relationship("File", back_populates="tag_labels")
+    filing_tag = relationship("FilingTag", back_populates="file_labels")
 
 class FileEmbedding(Base):
     """
@@ -162,26 +162,26 @@ class FileEmbedding(Base):
     # Relationship
     file = relationship("File", back_populates="embedding")
 
-class CodeCentroid(Base):
+class TagCentroid(Base):
     """
-    Code centroids for storing average embeddings per filing code.
+    Tag centroids for storing average embeddings per filing tag.
     
     PostgreSQL equivalent:
-    CREATE TABLE code_centroids (
-      code            TEXT PRIMARY KEY REFERENCES filing_codes(code),
+    CREATE TABLE tag_centroids (
+      tag             TEXT PRIMARY KEY REFERENCES filing_tags(label),
       model_name      TEXT,            -- 'all-MiniLM-L6-v2'
-      emb_avg         VECTOR(),        -- variable size for vectors of different models
+      emb_avg         VECTOR(384),
       doc_count       INTEGER,
       updated_at      TIMESTAMPTZ DEFAULT now()
     );
     """
-    __tablename__ = 'code_centroids'
+    __tablename__ = 'tag_centroids'
     
-    code = Column(Text, ForeignKey('filing_codes.code'), primary_key=True)
+    tag = Column(Text, ForeignKey('filing_tags.label'), primary_key=True)
     model_name = Column(Text)
-    emb_avg = Column(VECTOR())
+    emb_avg = Column(VECTOR(384))
     doc_count = Column(Integer)
     updated_at = Column(DateTime, default=func.now())
     
     # Relationship
-    filing_code = relationship("FilingCode", back_populates="centroid")
+    filing_tag = relationship("FilingTag", back_populates="centroid")

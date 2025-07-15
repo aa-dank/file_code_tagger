@@ -24,7 +24,7 @@ class File(Base):
     
     id = Column(Integer, primary_key=True)
     size = Column(BigInteger)
-    hash = Column(String,
+    hash = Column(String, nullable=False, unique=True,
                   comment="SHA1 File hash for integrity checks.")
     extension = Column(String)
     

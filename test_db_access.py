@@ -21,7 +21,7 @@ project_db_dict = dict(
     password=PROJECT_DB_PASSWORD,
 )
 
-def test_connection_and_info(cfg: dict, role: str) -> None:
+def test_connection_and_info(cfg: dict, role: str) -> bool:
     """Test connection and print database information."""
     print(f"\n{'='*60}")
     print(f"Testing {role} Database")
@@ -51,9 +51,9 @@ def test_connection_and_info(cfg: dict, role: str) -> None:
                 
                 # List tables and their row counts
                 cur.execute("""
-                    SELECT schemaname, tablename, n_tup_ins - n_tup_del as row_count
+                    SELECT schemaname, relname, n_tup_ins - n_tup_del as row_count
                     FROM pg_stat_user_tables 
-                    ORDER BY schemaname, tablename;
+                    ORDER BY schemaname, relname;
                 """)
                 tables = cur.fetchall()
                 

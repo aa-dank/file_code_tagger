@@ -1,36 +1,32 @@
-from psycopg import connect          # psycopg v3
+# sync_tables.py  –– psycopg v3, tqdm progress bar, dotenv creds
+from psycopg import connect
 from tqdm import tqdm
-import os
 from dotenv import load_dotenv
+import os
 
 load_dotenv()
 
-APP_DB_USERNAME = os.environ.get("APP_DB_USERNAME")
-APP_DB_PASSWORD = os.environ.get("APP_DB_PASSWORD")
-APP_DB_NAME = os.environ.get("APP_DB_NAME")
-APP_DB_PORT = os.environ.get("APP_DB_PORT")
-APP_DB_HOST = os.environ.get("APP_DB_HOST")
+SRC_DSN = (
+    f"postgresql://{os.getenv('APP_DB_USERNAME')}:{os.getenv('APP_DB_PASSWORD')}"
+    f"@{os.getenv('APP_DB_HOST')}:{os.getenv('APP_DB_PORT')}/{os.getenv('APP_DB_NAME')}"
+)
+DST_DSN = (
+    f"postgresql://{os.getenv('PROJECT_DB_USERNAME')}:{os.getenv('PROJECT_DB_PASSWORD')}"
+    f"@{os.getenv('PROJECT_DB_HOST')}:{os.getenv('PROJECT_DB_PORT')}/{os.getenv('PROJECT_DB_NAME')}"
+)
 
-PROJECT_DB_USERNAME = os.environ.get("PROJECT_DB_USERNAME")
-PROJECT_DB_PASSWORD = os.environ.get("PROJECT_DB_PASSWORD")
-PROJECT_DB_NAME = os.environ.get("PROJECT_DB_NAME")
-PROJECT_DB_PORT = os.environ.get("PROJECT_DB_PORT")
-PROJECT_DB_HOST = os.environ.get("PROJECT_DB_HOST")
-
-SRC_DSN = f"postgresql://{APP_DB_USERNAME}:{APP_DB_PASSWORD}@{APP_DB_HOST}:{APP_DB_PORT}/{APP_DB_NAME}"
-DST_DSN = f"postgresql://{PROJECT_DB_USERNAME}:{PROJECT_DB_PASSWORD}@{PROJECT_DB_HOST}:{PROJECT_DB_PORT}/{PROJECT_DB_NAME}"
-
-BATCH = 10_000         # rows per fetch/insert
+BATCH = 10_000
 
 TABLES = [
     (
         "files",
+        # ── hash is the business key ──────────────────────────────
         """INSERT INTO files (id, size, hash, extension)
            VALUES (%(id)s, %(size)s, %(hash)s, %(extension)s)
-           ON CONFLICT (id) DO UPDATE SET
-              size = EXCLUDED.size,
-              hash = EXCLUDED.hash,
-              extension = EXCLUDED.extension"""
+           ON CONFLICT (hash) DO UPDATE
+             SET id        = EXCLUDED.id,      -- refresh surrogate
+                 size      = EXCLUDED.size,
+                 extension = EXCLUDED.extension"""
     ),
     (
         "file_locations",
@@ -41,52 +37,60 @@ TABLES = [
                    %(hash_confirmed)s, %(file_server_directories)s,
                    %(filename)s)
            ON CONFLICT (id) DO UPDATE SET
-              file_id              = EXCLUDED.file_id,
-              existence_confirmed  = EXCLUDED.existence_confirmed,
-              hash_confirmed       = EXCLUDED.hash_confirmed,
-              file_server_directories = EXCLUDED.file_server_directories,
-              filename             = EXCLUDED.filename"""
+             file_id              = EXCLUDED.file_id,
+             existence_confirmed  = EXCLUDED.existence_confirmed,
+             hash_confirmed       = EXCLUDED.hash_confirmed,
+             file_server_directories = EXCLUDED.file_server_directories,
+             filename             = EXCLUDED.filename"""
     ),
 ]
 
+# ──────────────────────────────────────────────────────────────────────────────
 def stream_and_upsert(src_cur, dst_cur, table, upsert_sql):
-    # get row count for a progress bar
     src_cur.execute(f"SELECT COUNT(*) FROM {table}")
     total = src_cur.fetchone()[0]
-    bar = tqdm(total=total, desc=f"Sync {table}")
+    bar   = tqdm(total=total, desc=f"Sync {table}")
 
-    # server-side cursor streams rows without big RAM hit
     src_cur = src_cur.connection.cursor(name=f"stream_{table}")
-
     src_cur.execute(f"SELECT * FROM {table} ORDER BY id")
-    
-    # Get column names from the cursor description
-    columns = [col.name for col in src_cur.description]
-    
-    while True:
-        rows = src_cur.fetchmany(BATCH)
-        if not rows:
-            break
 
-        # Convert tuples to dictionaries using column names
-        dict_rows = [dict(zip(columns, row)) for row in rows]
+    cols = [c.name for c in src_cur.description]
+
+    while rows := src_cur.fetchmany(BATCH):
+        dict_rows = [dict(zip(cols, r)) for r in rows]
         dst_cur.executemany(upsert_sql, dict_rows)
         bar.update(len(rows))
 
+        # after each batch of *files* refresh hash in child tables
+        if table == "files":
+            dst_cur.execute(
+                """
+                UPDATE file_embeddings fe
+                  SET file_hash = f.hash
+                  FROM files f
+                 WHERE fe.file_id  = f.id
+                   AND fe.file_hash IS NULL;
+                UPDATE file_tag_labels tl
+                  SET file_hash = f.hash
+                  FROM files f
+                 WHERE tl.file_id = f.id
+                   AND tl.file_hash IS NULL;
+                """
+            )
+
     bar.close()
 
+# ──────────────────────────────────────────────────────────────────────────────
 def main():
     with connect(SRC_DSN) as src_conn, connect(DST_DSN) as dst_conn:
-        # autocommit off → commit after each table
         dst_conn.autocommit = False
-
-        src_cur = src_conn.cursor()   # we’ll open named cursors inside loop
+        src_cur = src_conn.cursor()
         dst_cur = dst_conn.cursor()
 
-        # copy files first (file_locations has FK)
-        for table, upsert_sql in TABLES:
-            stream_and_upsert(src_cur, dst_cur, table, upsert_sql)
-            dst_conn.commit()         # keeps WAL segments small
+        # order matters: files first (parent), then file_locations (child)
+        for table, sql in TABLES:
+            stream_and_upsert(src_cur, dst_cur, table, sql)
+            dst_conn.commit()       # keep WAL small, visible progress
 
         src_cur.close()
         dst_cur.close()

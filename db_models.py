@@ -107,6 +107,7 @@ class FileTagLabel(Base):
     PostgreSQL equivalent:
     CREATE TABLE file_tag_labels (
       file_id       INTEGER REFERENCES files(id),
+      file_hash     VARCHAR REFERENCES files(hash),
       tag           TEXT    REFERENCES filing_tags(label),
       is_primary   BOOLEAN DEFAULT TRUE,   -- leaf vs ancestor tag 
       label_source  TEXT,                     -- 'human', 'rule', 'model'
@@ -119,6 +120,8 @@ class FileTagLabel(Base):
     file_id = Column(Integer, ForeignKey('files.id'),
                      primary_key=True,
                      comment="File ID - primary key from files table.")
+    file_hash = Column(String, ForeignKey('files.hash'), nullable=False,
+                       comment="File hash - foreign key to files table.")
     tag = Column(Text, ForeignKey('filing_tags.label'),
                  primary_key=True,
                  comment="Filing tag label. This is a foreign key to the filing_tags table.")
@@ -133,7 +136,7 @@ class FileTagLabel(Base):
                    comment = "Data split - 'train', 'test', 'val'")
 
     # Relationships
-    file = relationship("File", back_populates="tag_labels")
+    file = relationship("File", back_populates="tag_labels", foreign_keys=[file_hash])
     filing_tag = relationship("FilingTag", back_populates="file_labels")
 
 
@@ -144,6 +147,7 @@ class FileEmbedding(Base):
     PostgreSQL equivalent:
     CREATE TABLE file_embeddings (
       file_id            INTEGER PRIMARY KEY REFERENCES files(id),
+      file_hash          VARCHAR NOT NULL REFERENCES files(hash),
       source_text        TEXT,                     -- OCR/plain text cache
       minilm_model       TEXT    DEFAULT 'all-MiniLM-L6-v2',
       minilm_emb         VECTOR(384),
@@ -171,7 +175,7 @@ class FileEmbedding(Base):
               postgresql_with={'lists': 100}),
     )
     
-    file_id = Column(Integer, ForeignKey('files.id'), primary_key=True)
+    file_hash = Column(String, ForeignKey('files.hash'), primary_key=True)
     source_text = Column(Text)
     minilm_model = Column(Text)
     minilm_emb = Column(VECTOR(384))
@@ -180,7 +184,7 @@ class FileEmbedding(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
     # Relationship
-    file = relationship("File", back_populates="embedding")
+    file = relationship("File", back_populates="embedding", foreign_keys=[file_hash])
 
 
 class TagPrototype(Base):

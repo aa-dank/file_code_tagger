@@ -198,7 +198,7 @@ class TagPrototype(Base):
       tag           TEXT REFERENCES filing_tags(label) ON DELETE CASCADE,
       prototype_id  SMALLINT DEFAULT 0,     -- 0 = centroid
       model_name    TEXT NOT NULL,
-      embedding     VECTOR() NOT NULL,      -- any dimension
+      embedding     VECTOR(768) NOT NULL,   -- fixed dimension
       doc_count     INTEGER,
       updated_at    TIMESTAMPTZ DEFAULT now(),
       PRIMARY KEY (tag, prototype_id)
@@ -227,7 +227,7 @@ class TagPrototype(Base):
     )
     prototype_id = Column(SmallInteger, primary_key=True, default=0)  # 0 = centroid
     model_name   = Column(Text, nullable=False)
-    embedding    = Column(VECTOR(), nullable=False)  # any dimension
+    embedding    = Column(VECTOR(768), nullable=False)  # fixed dimension
     doc_count    = Column(Integer)
     updated_at   = Column(DateTime, server_default=func.now())
     notes        = Column(Text,

@@ -2,23 +2,26 @@ import psycopg
 from psycopg import sql
 from psycopg.errors import OperationalError
 import sys
+from dotenv import load_dotenv
+import os
 
-from creds import APP_DB_USERNAME, APP_DB_PASSWORD, PROJECT_DB_USERNAME, PROJECT_DB_PASSWORD
+# Load environment variables
+load_dotenv()
 
 app_db_dict = dict(
-    host="128.114.128.27",
-    port=5432,
-    dbname="archives",
-    user=APP_DB_USERNAME,
-    password=APP_DB_PASSWORD,
+    host=os.getenv("APP_DB_HOST"),
+    port=int(os.getenv("APP_DB_PORT")),
+    dbname=os.getenv("APP_DB_NAME"),
+    user=os.getenv("APP_DB_USERNAME"),
+    password=os.getenv("APP_DB_PASSWORD"),
 )
 
 project_db_dict = dict(
-    host="localhost",
-    port=5433,
-    dbname="archives",
-    user=PROJECT_DB_USERNAME,
-    password=PROJECT_DB_PASSWORD,
+    host=os.getenv("PROJECT_DB_HOST"),
+    port=int(os.getenv("PROJECT_DB_PORT")),
+    dbname=os.getenv("PROJECT_DB_NAME"),
+    user=os.getenv("PROJECT_DB_USERNAME"),
+    password=os.getenv("PROJECT_DB_PASSWORD"),
 )
 
 def test_connection_and_info(cfg: dict, role: str) -> bool:

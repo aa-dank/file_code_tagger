@@ -2,16 +2,20 @@ import sys
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from dotenv import load_dotenv
+import os
+
+# Load environment variables
+load_dotenv()
 
 # Import the SQLAlchemy models
 from db_models import FilingTag, Base
-from creds import PROJECT_DB_USERNAME, PROJECT_DB_PASSWORD
 
 def get_db_engine():
     """Create and return a SQLAlchemy engine for the project database."""
     conn_string = (
-        f"postgresql+psycopg://{PROJECT_DB_USERNAME}:{PROJECT_DB_PASSWORD}"
-        f"@localhost:5433/archives"
+        f"postgresql+psycopg://{os.getenv('PROJECT_DB_USERNAME')}:{os.getenv('PROJECT_DB_PASSWORD')}"
+        f"@{os.getenv('PROJECT_DB_HOST')}:{os.getenv('PROJECT_DB_PORT')}/{os.getenv('PROJECT_DB_NAME')}"
     )
     return create_engine(conn_string)
 

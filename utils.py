@@ -65,7 +65,6 @@ def file_tag_prefix(file_tag:str) -> str:
     """
     return file_tag.split(" ")[0] + " - "
 
-
 def get_hash(filepath, hash_algo=hashlib.sha1):
     """"
     This function takes a filepath and a hash algorithm as input and returns the hash of the file at the filepath

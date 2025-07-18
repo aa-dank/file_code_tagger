@@ -3,15 +3,15 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, SmallInteger, Text, Boolean, Numeric, Index, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import VECTOR
 from sqlalchemy.sql import func
+from pgvector.sqlalchemy import Vector
 
 Base = declarative_base()
 
 class File(Base):
     """
     Main files table storing file metadata.
-    
+      
     PostgreSQL equivalent:
     CREATE TABLE files (
       id        INTEGER PRIMARY KEY,
@@ -29,11 +29,19 @@ class File(Base):
     extension = Column(String)
     
     # Relationship to file_locations
-    locations = relationship("FileLocation", back_populates="file", cascade="all, delete-orphan")
+    locations = relationship("FileLocation",
+                             back_populates="file",
+                             cascade="all, delete-orphan")
     # Relationship to file_tag_labels
-    tag_labels = relationship("FileTagLabel", back_populates="file", cascade="all, delete-orphan")
+    tag_labels = relationship("FileTagLabel",
+                              back_populates="file",
+                              cascade="all, delete-orphan",
+                              foreign_keys="[FileTagLabel.file_hash]")
     # Relationship to file_embeddings
-    embedding = relationship("FileEmbedding", back_populates="file", uselist=False, cascade="all, delete-orphan")
+    embedding = relationship("FileEmbedding",
+                             back_populates="file",
+                             uselist=False,
+                             cascade="all, delete-orphan")
 
 
 class FileLocation(Base):
@@ -150,13 +158,13 @@ class FileEmbedding(Base):
       file_hash          VARCHAR NOT NULL REFERENCES files(hash),
       source_text        TEXT,                     -- OCR/plain text cache
       minilm_model       TEXT    DEFAULT 'all-MiniLM-L6-v2',
-      minilm_emb         VECTOR(384),
+      minilm_emb         Vector(384),
       mpnet_model        TEXT,
-      mpnet_emb          VECTOR(768),
+      mpnet_emb          Vector(768),
       updated_at         TIMESTAMPTZ DEFAULT now()
     );
-    
-    -- Indexes for ANN search (one per VECTOR column)
+
+    -- Indexes for ANN search (one per Vector column)
     CREATE INDEX ON file_embeddings
       USING ivfflat (minilm_emb vector_cosine_ops) WITH (lists = 100);
     
@@ -178,9 +186,9 @@ class FileEmbedding(Base):
     file_hash = Column(String, ForeignKey('files.hash'), primary_key=True)
     source_text = Column(Text)
     minilm_model = Column(Text)
-    minilm_emb = Column(VECTOR(384))
+    minilm_emb = Column(Vector(384))
     mpnet_model = Column(Text)
-    mpnet_emb = Column(VECTOR(768))
+    mpnet_emb = Column(Vector(768))
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
     # Relationship
@@ -198,7 +206,7 @@ class TagPrototype(Base):
       tag           TEXT REFERENCES filing_tags(label) ON DELETE CASCADE,
       prototype_id  SMALLINT DEFAULT 0,     -- 0 = centroid
       model_name    TEXT NOT NULL,
-      embedding     VECTOR(768) NOT NULL,   -- fixed dimension
+      embedding     Vector(768) NOT NULL,   -- fixed dimension
       doc_count     INTEGER,
       updated_at    TIMESTAMPTZ DEFAULT now(),
       PRIMARY KEY (tag, prototype_id)
@@ -227,7 +235,7 @@ class TagPrototype(Base):
     )
     prototype_id = Column(SmallInteger, primary_key=True, default=0)  # 0 = centroid
     model_name   = Column(Text, nullable=False)
-    embedding    = Column(VECTOR(768), nullable=False)  # fixed dimension
+    embedding    = Column(Vector(768), nullable=False)  # fixed dimension
     doc_count    = Column(Integer)
     updated_at   = Column(DateTime, server_default=func.now())
     notes        = Column(Text,

@@ -24,8 +24,7 @@ TABLES = [
         """INSERT INTO files (id, size, hash, extension)
            VALUES (%(id)s, %(size)s, %(hash)s, %(extension)s)
            ON CONFLICT (hash) DO UPDATE
-             SET id        = EXCLUDED.id,      -- refresh surrogate
-                 size      = EXCLUDED.size,
+             SET size      = EXCLUDED.size,
                  extension = EXCLUDED.extension"""
     ),
     (
@@ -56,10 +55,28 @@ def stream_and_upsert(src_cur, dst_cur, table, upsert_sql):
 
     cols = [c.name for c in src_cur.description]
 
+    # For file_locations, pre-fetch all valid file IDs from destination
+    valid_file_ids = set()
+    if table == "file_locations":
+        dst_cur.execute("SELECT id FROM files")
+        valid_file_ids = {row[0] for row in dst_cur.fetchall()}
+        print(f"\nFound {len(valid_file_ids)} valid file IDs in destination database")
+
     while rows := src_cur.fetchmany(BATCH):
         dict_rows = [dict(zip(cols, r)) for r in rows]
-        dst_cur.executemany(upsert_sql, dict_rows)
-        bar.update(len(rows))
+        
+        # Filter out file_locations with invalid file_id references
+        if table == "file_locations":
+            original_count = len(dict_rows)
+            dict_rows = [row for row in dict_rows if row['file_id'] in valid_file_ids]
+            skipped = original_count - len(dict_rows)
+            if skipped > 0:
+                print(f"Skipped {skipped} file_locations with invalid file_id references")
+        
+        if dict_rows:  # Only execute if we have rows to process
+            dst_cur.executemany(upsert_sql, dict_rows)
+        
+        bar.update(len(rows))  # Update progress bar based on source rows processed
 
         # after each batch of *files* refresh hash in child tables
         if table == "files":
@@ -68,7 +85,7 @@ def stream_and_upsert(src_cur, dst_cur, table, upsert_sql):
                 UPDATE file_embeddings fe
                   SET file_hash = f.hash
                   FROM files f
-                 WHERE fe.file_id  = f.id
+                 WHERE fe.file_hash = f.hash
                    AND fe.file_hash IS NULL;
                 UPDATE file_tag_labels tl
                   SET file_hash = f.hash
@@ -97,3 +114,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

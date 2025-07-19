@@ -8,8 +8,7 @@ import os
 # Load environment variables
 load_dotenv()
 
-# Import the SQLAlchemy models
-from db_models import FilingTag, Base
+from db_models import FilingTag
 
 def get_db_engine():
     """Create and return a SQLAlchemy engine for the project database."""
@@ -141,9 +140,6 @@ def main():
         #print error and stack trace
         import traceback
         traceback.print_exc()
-        print(f"Error importing filing codes: {e}")
-        return 1
-
         print(f"Error importing filing codes: {e}")
         return 1
 

@@ -7,11 +7,11 @@ import os
 load_dotenv()
 
 SRC_DSN = (
-    f"postgresql://{os.getenv('APP_DB_USERNAME')}:{os.getenv('APP_DB_PASSWORD')}"
+    f"postgresql+psycopg://{os.getenv('APP_DB_USERNAME')}:{os.getenv('APP_DB_PASSWORD')}"
     f"@{os.getenv('APP_DB_HOST')}:{os.getenv('APP_DB_PORT')}/{os.getenv('APP_DB_NAME')}"
 )
 DST_DSN = (
-    f"postgresql://{os.getenv('PROJECT_DB_USERNAME')}:{os.getenv('PROJECT_DB_PASSWORD')}"
+    f"postgresql+psycopg://{os.getenv('PROJECT_DB_USERNAME')}:{os.getenv('PROJECT_DB_PASSWORD')}"
     f"@{os.getenv('PROJECT_DB_HOST')}:{os.getenv('PROJECT_DB_PORT')}/{os.getenv('PROJECT_DB_NAME')}"
 )
 

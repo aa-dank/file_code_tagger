@@ -5,6 +5,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
+from sqlalchemy.types import JSON
 
 Base = declarative_base()
 
@@ -243,3 +244,169 @@ class TagPrototype(Base):
 
     # ORM back-ref
     filing_tag = relationship("FilingTag", back_populates="prototypes")
+
+class PrototypeRun(Base):
+    """
+    Records a single prototype‐generation experiment.
+
+    Each row captures the configuration and context used to generate
+    one set of TagPrototypes (centroids or sub‐clusters) for all filing tags.
+
+    Attributes:
+        run_id         – Auto‐incrementing surrogate key.
+        model_name     – Name of the embedding model (e.g. 'all-MiniLM-L6-v2').
+        model_version  – Version or date of the model (e.g. '2025-07-21').
+        algorithm      – Prototype algorithm (e.g. 'mean', 'k-means-centroid').
+        hyperparams    – JSON blob of algorithm parameters (e.g. {"k":5}).
+        tag_filter     – Optional SQL WHERE fragment used to select tags/files.
+        created_at     – Timestamp when this run was created.
+        members        – Relationship to PrototypeMember entries.
+        metrics        – Relationship to PrototypeRunMetric entries.
+    """
+    __tablename__ = "prototype_runs"
+
+    run_id        = Column(Integer, primary_key=True)
+    model_name    = Column(Text, nullable=False)
+    model_version = Column(Text, nullable=False)
+    algorithm     = Column(Text, nullable=False)
+    hyperparams   = Column(JSON, nullable=True)
+    tag_filter    = Column(Text, nullable=True)
+    created_at    = Column(DateTime, server_default=func.now(), nullable=False)
+
+    # Relationships
+    members = relationship(
+        "PrototypeMember",
+        back_populates="run",
+        cascade="all, delete-orphan"
+    )
+    metrics = relationship(
+        "PrototypeRunMetric",
+        back_populates="run",
+        cascade="all, delete-orphan"
+    )
+
+class PrototypeRun(Base):
+    """
+    One **prototype creation run** (i.e., a snapshot of training data +
+    hyper-parameters used to generate centroids).
+
+    Key columns
+    -----------
+    run_id
+        Auto-incrementing primary key; referenced by all downstream artefacts.
+    model_name / model_version
+        Identify the embedding model ('all-MiniLM-L6-v2', 'mpnet', …) and its
+        frozen weight checksum or release date.  Crucial for reproducibility.
+    algorithm
+        High-level method used to derive prototypes ('mean', 'k-means-centroid',
+        'affinity-prop', etc.).
+    hyperparams
+        Arbitrary JSON blob storing parameters like *k*, minimum document
+        count, distance metric, random seed, etc.
+    tag_filter
+        Optional textual description (or literal SQL WHERE fragment) that
+        limited the training pool, e.g. `"importance_rank <= 2"`.
+    created_at
+        Timestamp of run creation; automatically populated.
+    """
+
+    __tablename__ = "prototype_runs"
+
+    run_id = Column(Integer, primary_key=True)
+    model_name = Column(String, nullable=False)
+    model_version = Column(String, nullable=False)
+    algorithm = Column(String, nullable=False)
+    hyperparams = Column(JSONB)
+    tag_filter = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    # ─── Relationships ────────────────────────────────────────────────────────
+    members = relationship(
+        "PrototypeMember",
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+    metrics = relationship(
+        "PrototypeRunMetric",
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+    # Optional back-ref from TagPrototype if you added run_id there
+    # prototypes = relationship("TagPrototype", back_populates="run")
+
+
+class PrototypeMember(Base):
+    """
+    Links every **source file** to the prototype it contributed to *within a
+    specific run*.
+
+    Composite PK lets you store multiple sub-centroids per tag
+    (``prototype_id > 0`` for k-means clusters, ``0`` for global centroid).
+
+    Useful queries
+    --------------
+    •  Quickly list all training files for a tag/run:
+         ``SELECT file_id FROM prototype_members
+            WHERE run_id = :run AND tag = 'F7.1';``
+
+    •  Diagnose outliers (distance of each member from its centroid).
+    """
+
+    __tablename__ = "prototype_members"
+
+    run_id = Column(
+        Integer,
+        ForeignKey("prototype_runs.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tag = Column(
+        Text,
+        ForeignKey("filing_tags.label", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    prototype_id = Column(SmallInteger, primary_key=True, default=0)
+    file_id = Column(
+        Integer,
+        ForeignKey("files.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    # ─── Relationships ────────────────────────────────────────────────────────
+    run = relationship("PrototypeRun", back_populates="members")
+    filing_tag = relationship("FilingTag")
+    file = relationship("File")
+
+    __table_args__ = (
+        Index(
+            "ix_prototype_members_run_tag_pid",
+            "run_id",
+            "tag",
+            "prototype_id",
+        ),
+    )
+
+class PrototypeRunMetric(Base):
+    """
+    Stores **objective evaluation metrics** (accuracy, F1, MRR, etc.) for a
+    given run on a particular data split.
+
+    Having metrics in SQL means you can:
+    •  Grafana-dash accuracy over time.
+    •  Programmatically pick the best run for deployment
+       ``ORDER BY split='val', metric_name='micro_F1', value DESC LIMIT 1``.
+    """
+
+    __tablename__ = "prototype_run_metrics"
+
+    run_id = Column(
+        Integer,
+        ForeignKey("prototype_runs.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    metric_name = Column(Text, primary_key=True)
+    split = Column(Text, primary_key=True)  # 'train' | 'test' | 'val'
+    value = Column(Numeric)
+    computed_at = Column(DateTime, server_default=func.now())
+
+    # ─── Relationships ────────────────────────────────────────────────────────
+    run = relationship("PrototypeRun", back_populates="metrics")

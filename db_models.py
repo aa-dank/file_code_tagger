@@ -1,11 +1,12 @@
 # Database Models
 
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, SmallInteger, Text, Boolean, Numeric, Index, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
-from sqlalchemy.types import JSON
+
 
 Base = declarative_base()
 
@@ -24,7 +25,8 @@ class File(Base):
     __tablename__ = 'files'
     
     id = Column(Integer, primary_key=True)
-    size = Column(BigInteger)
+    size = Column(BigInteger, nullable=False,
+                  comment="File size in bytes.")
     hash = Column(String, nullable=False, unique=True,
                   comment="SHA1 File hash for integrity checks.")
     extension = Column(String)
@@ -63,8 +65,8 @@ class FileLocation(Base):
     
     id = Column(Integer, primary_key=True)
     file_id = Column(Integer, ForeignKey('files.id'), nullable=False)
-    existence_confirmed = Column(DateTime)
-    hash_confirmed = Column(DateTime)
+    existence_confirmed = Column(DateTime(timezone=True))
+    hash_confirmed = Column(DateTime(timezone=True))
     file_server_directories = Column(String)
     filename = Column(String)
     
@@ -190,7 +192,7 @@ class FileEmbedding(Base):
     minilm_emb = Column(Vector(384))
     mpnet_model = Column(Text)
     mpnet_emb = Column(Vector(768))
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationship
     file = relationship("File", back_populates="embedding", foreign_keys=[file_hash])
@@ -238,22 +240,34 @@ class TagPrototype(Base):
     model_name   = Column(Text, nullable=False)
     embedding    = Column(Vector(768), nullable=False)  # fixed dimension
     doc_count    = Column(Integer)
-    updated_at   = Column(DateTime, server_default=func.now())
+    updated_at   = Column(DateTime(timezone=True), server_default=func.now())
     notes        = Column(Text,
                           comment="Optional notes about the prototype.")
 
     # ORM back-ref
     filing_tag = relationship("FilingTag", back_populates="prototypes")
 
+
 class PrototypeRun(Base):
     """
-    Records a single prototype‐generation experiment.
+    Records a single prototype-generation experiment.
+
+    PostgreSQL equivalent:
+    CREATE TABLE prototype_runs (
+      run_id        SERIAL PRIMARY KEY,
+      model_name    TEXT NOT NULL,
+      model_version TEXT NOT NULL,
+      algorithm     TEXT NOT NULL,
+      hyperparams   JSONB,
+      tag_filter    TEXT,
+      created_at    TIMESTAMPTZ DEFAULT now()
+    );
 
     Each row captures the configuration and context used to generate
-    one set of TagPrototypes (centroids or sub‐clusters) for all filing tags.
+    one set of TagPrototypes (centroids or sub-clusters) for all filing tags.
 
     Attributes:
-        run_id         – Auto‐incrementing surrogate key.
+        run_id         – Auto-incrementing surrogate key.
         model_name     – Name of the embedding model (e.g. 'all-MiniLM-L6-v2').
         model_version  – Version or date of the model (e.g. '2025-07-21').
         algorithm      – Prototype algorithm (e.g. 'mean', 'k-means-centroid').
@@ -269,9 +283,10 @@ class PrototypeRun(Base):
     model_name    = Column(Text, nullable=False)
     model_version = Column(Text, nullable=False)
     algorithm     = Column(Text, nullable=False)
-    hyperparams   = Column(JSON, nullable=True)
+    hyperparams   = Column(JSONB, nullable=True)
     tag_filter    = Column(Text, nullable=True)
-    created_at    = Column(DateTime, server_default=func.now(), nullable=False)
+    created_at    = Column(DateTime(timezone=True),
+                           server_default=func.now(), nullable=False)
 
     # Relationships
     members = relationship(
@@ -285,60 +300,21 @@ class PrototypeRun(Base):
         cascade="all, delete-orphan"
     )
 
-class PrototypeRun(Base):
-    """
-    One **prototype creation run** (i.e., a snapshot of training data +
-    hyper-parameters used to generate centroids).
-
-    Key columns
-    -----------
-    run_id
-        Auto-incrementing primary key; referenced by all downstream artefacts.
-    model_name / model_version
-        Identify the embedding model ('all-MiniLM-L6-v2', 'mpnet', …) and its
-        frozen weight checksum or release date.  Crucial for reproducibility.
-    algorithm
-        High-level method used to derive prototypes ('mean', 'k-means-centroid',
-        'affinity-prop', etc.).
-    hyperparams
-        Arbitrary JSON blob storing parameters like *k*, minimum document
-        count, distance metric, random seed, etc.
-    tag_filter
-        Optional textual description (or literal SQL WHERE fragment) that
-        limited the training pool, e.g. `"importance_rank <= 2"`.
-    created_at
-        Timestamp of run creation; automatically populated.
-    """
-
-    __tablename__ = "prototype_runs"
-
-    run_id = Column(Integer, primary_key=True)
-    model_name = Column(String, nullable=False)
-    model_version = Column(String, nullable=False)
-    algorithm = Column(String, nullable=False)
-    hyperparams = Column(JSONB)
-    tag_filter = Column(Text)
-    created_at = Column(DateTime, server_default=func.now())
-
-    # ─── Relationships ────────────────────────────────────────────────────────
-    members = relationship(
-        "PrototypeMember",
-        back_populates="run",
-        cascade="all, delete-orphan",
-    )
-    metrics = relationship(
-        "PrototypeRunMetric",
-        back_populates="run",
-        cascade="all, delete-orphan",
-    )
-    # Optional back-ref from TagPrototype if you added run_id there
-    # prototypes = relationship("TagPrototype", back_populates="run")
-
 
 class PrototypeMember(Base):
     """
     Links every **source file** to the prototype it contributed to *within a
     specific run*.
+
+    PostgreSQL equivalent:
+    CREATE TABLE prototype_members (
+      run_id       INTEGER REFERENCES prototype_runs(run_id) ON DELETE CASCADE,
+      tag          TEXT REFERENCES filing_tags(label) ON DELETE CASCADE,
+      prototype_id SMALLINT DEFAULT 0,
+      file_id      INTEGER REFERENCES files(id) ON DELETE CASCADE,
+      PRIMARY KEY (run_id, tag, prototype_id, file_id)
+    );
+    CREATE INDEX ix_prototype_members_run_tag_pid ON prototype_members(run_id, tag, prototype_id);
 
     Composite PK lets you store multiple sub-centroids per tag
     (``prototype_id > 0`` for k-means clusters, ``0`` for global centroid).
@@ -385,10 +361,21 @@ class PrototypeMember(Base):
         ),
     )
 
+
 class PrototypeRunMetric(Base):
     """
     Stores **objective evaluation metrics** (accuracy, F1, MRR, etc.) for a
     given run on a particular data split.
+
+    PostgreSQL equivalent:
+    CREATE TABLE prototype_run_metrics (
+      run_id      INTEGER REFERENCES prototype_runs(run_id) ON DELETE CASCADE,
+      metric_name TEXT,
+      split       TEXT,
+      value       NUMERIC,
+      computed_at TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (run_id, metric_name, split)
+    );
 
     Having metrics in SQL means you can:
     •  Grafana-dash accuracy over time.
@@ -406,7 +393,7 @@ class PrototypeRunMetric(Base):
     metric_name = Column(Text, primary_key=True)
     split = Column(Text, primary_key=True)  # 'train' | 'test' | 'val'
     value = Column(Numeric)
-    computed_at = Column(DateTime, server_default=func.now())
+    computed_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # ─── Relationships ────────────────────────────────────────────────────────
     run = relationship("PrototypeRun", back_populates="metrics")

@@ -1,3 +1,5 @@
+# embedding/base.py  –– Base class for embedding models
+
 import numpy as np
 from typing import List, Sequence
 from abc import ABC, abstractmethod

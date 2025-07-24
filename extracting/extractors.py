@@ -24,6 +24,11 @@ class PDFFile:
     """
     
     def __init__(self, path: str):
+        
+        def pt_to_in(pt: float) -> float:
+            """Converts points to inches."""
+            return pt / 72.0
+
         # if the path doesn't exist or is not a file, raise an error
         if not Path(path).exists(): 
             raise FileNotFoundError(f"PDF file not found: {path}")
@@ -35,6 +40,7 @@ class PDFFile:
         self.name = self.path.stem
         self.page_count = None
         self.encrypted = False
+        self.pages_dims = []
         with fitz.open(self.path) as doc:
             
             # if the file is not a PDF, raise an error
@@ -43,6 +49,7 @@ class PDFFile:
 
             self.page_count = doc.page_count
             self.encrypted = doc.is_encrypted
+            self.pages_dims = [(pt_to_in(page.rect.width), pt_to_in(page.rect.height)) for page in doc]
 
     def read(self):
         """
@@ -88,7 +95,8 @@ class PDFTextExtractor(FileTextExtractor):
             text = ""
             for page in doc:
                 text += page.get_text()
-            return text.strip()
+        
+        return text.strip()
 
     def __call__(self, pdf_filepath: str) -> str:
         pdf_text = ""

@@ -5,7 +5,7 @@ from typing import List
 from pathlib import Path
 
 import pytesseract
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageSequence
 import numpy as np
 
 try:
@@ -49,6 +49,7 @@ class ImageTextExtractor(FileTextExtractor):
         max_side : int
             Resize largest image side to this (keeps memory reasonable).
         """
+        super().__init__()
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
         self.lang = lang

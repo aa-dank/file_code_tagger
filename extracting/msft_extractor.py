@@ -1,8 +1,8 @@
-# extracting/word_win.py
+# extracting/msft_extractor.py
+
 import tempfile
 from pathlib import Path
 from typing import List
-from abc import ABC
 
 import pythoncom
 import win32com.client
@@ -13,7 +13,7 @@ from striprtf.striprtf import rtf_to_text
 
 from .extractors import FileTextExtractor
 
-class WordFileTextExtractor(FileTextExtractor, ABC):
+class WordFileTextExtractor(FileTextExtractor):
     """
     Windows-friendly text extractor for Word formats.
     - DOCX/DOCM: mammoth -> markdown (fallback python-docx)
@@ -24,6 +24,7 @@ class WordFileTextExtractor(FileTextExtractor, ABC):
 
     def __init__(self, use_mammoth: bool = True, use_word_com: bool = True,
                  pandoc_path: str | None = None):
+        super().__init__()
         self.use_mammoth  = use_mammoth
         self.use_word_com = use_word_com
         self.pandoc_path  = pandoc_path

@@ -36,8 +36,9 @@ ENV/
 env/
 .virtualenv
 
-# Development directory
+# Development directories
 dev/
+test_files/
 
 # Log files
 *.log

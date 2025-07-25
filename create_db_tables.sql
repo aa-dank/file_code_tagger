@@ -73,3 +73,42 @@ CREATE TABLE tag_prototypes (
 CREATE INDEX ix_tag_prototypes_embedding
   ON tag_prototypes USING ivfflat (embedding vector_cosine_ops)
   WITH (lists = 100);
+
+-------------------------------------------------------------------------------
+-- 5. prototype_runs  (records prototype generation experiments)
+-------------------------------------------------------------------------------
+CREATE TABLE prototype_runs (
+    run_id        SERIAL PRIMARY KEY,
+    model_name    TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    algorithm     TEXT NOT NULL,
+    hyperparams   JSONB,
+    tag_filter    TEXT,
+    created_at    TIMESTAMPTZ DEFAULT now()
+);
+
+-------------------------------------------------------------------------------
+-- 6. prototype_members  (links files to prototypes they contributed to)
+-------------------------------------------------------------------------------
+CREATE TABLE prototype_members (
+    run_id       INTEGER REFERENCES prototype_runs(run_id) ON DELETE CASCADE,
+    tag          TEXT REFERENCES filing_tags(label) ON DELETE CASCADE,
+    prototype_id SMALLINT DEFAULT 0,
+    file_id      INTEGER REFERENCES files(id) ON DELETE CASCADE,
+    PRIMARY KEY (run_id, tag, prototype_id, file_id)
+);
+
+CREATE INDEX ix_prototype_members_run_tag_pid 
+    ON prototype_members(run_id, tag, prototype_id);
+
+-------------------------------------------------------------------------------
+-- 7. prototype_run_metrics  (evaluation metrics for prototype runs)
+-------------------------------------------------------------------------------
+CREATE TABLE prototype_run_metrics (
+    run_id      INTEGER REFERENCES prototype_runs(run_id) ON DELETE CASCADE,
+    metric_name TEXT,
+    split       TEXT,
+    value       NUMERIC,
+    computed_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (run_id, metric_name, split)
+);

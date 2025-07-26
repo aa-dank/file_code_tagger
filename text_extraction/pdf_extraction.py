@@ -8,7 +8,7 @@ import tempfile
 
 from pathlib import Path
 from typing import Union
-from .extractors import FileTextExtractor
+from .basic_extraction import FileTextExtractor
 
 class PDFFile:
     """

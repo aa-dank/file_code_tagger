@@ -14,7 +14,7 @@ try:
 except ImportError:
     _HAS_CV2 = False
 
-from .extractors import FileTextExtractor
+from .basic_extraction import FileTextExtractor
 
 
 class ImageTextExtractor(FileTextExtractor):

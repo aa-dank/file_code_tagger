@@ -16,6 +16,7 @@ from striprtf.striprtf import rtf_to_text
 
 # Local imports
 from .basic_extraction import FileTextExtractor
+from .extraction_utils import validate_file, normalize_whitespace, run_pandoc, com_app
 
 class WordFileTextExtractor(FileTextExtractor):
     """
@@ -34,13 +35,19 @@ class WordFileTextExtractor(FileTextExtractor):
         self.pandoc_path  = pandoc_path
 
     def __call__(self, path: str) -> str:
-        ext = Path(path).suffix.lower().lstrip(".")
+        """
+        Determine extraction method and normalize text.
+        """
+        # validate input file
+        p = validate_file(path)
+        ext = p.suffix.lower().lstrip('.')
         if ext in ("docx", "docm"):
-            return self._extract_docx(path)
+            text = self._extract_docx(str(p))
         elif ext in ("doc", "rtf"):
-            return self._extract_legacy(path, ext)
+            text = self._extract_legacy(str(p), ext)
         else:
             raise ValueError(f"Unsupported Word extension: {ext}")
+        return normalize_whitespace(text)
 
     # ---------- helpers ----------
     def _extract_docx(self, path: str) -> str:
@@ -136,15 +143,15 @@ class SpreadsheetTextExtractor(FileTextExtractor):
         self.delimiter = delimiter
 
     def __call__(self, path: str) -> str:
-        p = Path(path)
-        if not p.exists() or not p.is_file():
-            raise FileNotFoundError(path)
-
-        ext = p.suffix.lower().lstrip(".")
+        # validate input file
+        p = validate_file(path)
+        ext = p.suffix.lower().lstrip('.')
         if ext in ("csv", "tsv"):
-            return self._read_delimited(p, ext)
+            text = self._read_delimited(p, ext)
         else:
-            return self._read_excel_like(p, ext)
+            text = self._read_excel_like(p, ext)
+        # normalize whitespace
+        return normalize_whitespace(text)
 
     # ------------- helpers -------------
 
@@ -246,21 +253,21 @@ class PresentationTextExtractor(FileTextExtractor):
         self.pandoc_path = pandoc_path
 
     def __call__(self, path: str) -> str:
-        p = Path(path)
-        if not p.exists() or not p.is_file():
-            raise FileNotFoundError(path)
-
+        # validate input file
+        p = validate_file(path)
         ext = p.suffix.lower().lstrip('.')
 
         if ext in ("pptx", "pptm", "ppsx"):
-            return self._extract_pptx(path)
+            text = self._extract_pptx(str(p))
         else:
             # ppt, pps, odp → convert
-            converted = self._convert_to_pptx_or_txt(path, ext)
+            converted = self._convert_to_pptx_or_txt(str(p), ext)
             if converted.suffix.lower() == ".txt":
-                return converted.read_text(encoding="utf-8", errors="ignore")
+                text = converted.read_text(encoding="utf-8", errors="ignore")
             else:
-                return self._extract_pptx(str(converted))
+                text = self._extract_pptx(str(converted))
+        # normalize whitespace
+        return normalize_whitespace(text)
 
     # ---------- pptx path ----------
     def _extract_pptx(self, path: str) -> str:

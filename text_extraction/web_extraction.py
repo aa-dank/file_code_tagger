@@ -7,6 +7,7 @@ import email
 from email import policy
 
 from .basic_extraction import FileTextExtractor
+from .extraction_utils import validate_file, strip_html
 
 class HtmlTextExtractor(FileTextExtractor):
     """
@@ -63,9 +64,8 @@ class HtmlTextExtractor(FileTextExtractor):
         FileNotFoundError
             If the file does not exist or is not a valid file.
         """
-        p = Path(path)
-        if not p.exists() or not p.is_file():
-            raise FileNotFoundError(path)
+        # validate file existence and type
+        p = validate_file(path)
 
         ext = p.suffix.lower().lstrip(".")
         if ext in ("mhtml", "mht"):
@@ -73,11 +73,8 @@ class HtmlTextExtractor(FileTextExtractor):
         else:
             html = p.read_text(errors="ignore", encoding="utf-8")
 
-        soup = BeautifulSoup(html, self.parser)
-        for tag in soup(["script", "style", "noscript"]):
-            tag.decompose()
-        text = soup.get_text(separator=" ", strip=True)
-        return " ".join(text.split())
+        # use shared HTML stripping utility
+        return strip_html(html, parser=self.parser)
 
     def _extract_from_mhtml(self, path: Path) -> str:
         """
@@ -136,6 +133,7 @@ class EmailTextExtractor(FileTextExtractor):
         """
         super().__init__()
         self.parser = parser
+        from .extraction_utils import normalize_whitespace
 
     def __call__(self, path: str) -> str:
         """
@@ -156,22 +154,23 @@ class EmailTextExtractor(FileTextExtractor):
         FileNotFoundError
             If the file does not exist or is not a valid file.
         """
-        p = Path(path)
-        if not p.exists() or not p.is_file():
-            raise FileNotFoundError(path)
+        # validate file
+        from .extraction_utils import validate_file, strip_html, normalize_whitespace
+        p = validate_file(path)
 
         with open(p, "rb") as f:
             msg = email.message_from_binary_file(f, policy=policy.default)
 
         text_parts = []
         for part in msg.walk():
-            if part.get_content_type() == "text/plain":
+            content_type = part.get_content_type()
+            if content_type == "text/plain":
                 text_parts.append(part.get_content())
-            elif part.get_content_type() == "text/html":
+            elif content_type == "text/html":
                 html = part.get_content()
-                soup = BeautifulSoup(html, self.parser)
-                for tag in soup(["script", "style", "noscript"]):
-                    tag.decompose()
-                text_parts.append(soup.get_text(separator=" ", strip=True))
+                # use shared HTML stripping
+                text_parts.append(strip_html(html, parser=self.parser))
 
-        return " ".join(" ".join(text_parts).split())
+        # normalize overall whitespace
+        combined = " ".join(text_parts)
+        return normalize_whitespace(combined)

@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Union
 from .basic_extraction import FileTextExtractor
+from .extraction_utils import validate_file, normalize_whitespace
 
 class PDFFile:
     """
@@ -183,12 +184,14 @@ class PDFTextExtractor(FileTextExtractor):
         FileNotFoundError
             If the PDF file does not exist or is not a valid file.
         """
+        # validate input file
+        p = validate_file(pdf_filepath)
         pdf_text = ""
         ocr_needed = False
         with tempfile.TemporaryDirectory(prefix="text_extractor_") as staging_location:
-            new_pdf_path = Path(staging_location) / Path(pdf_filepath).name
-            # move the PDF to the staging location
-            shutil.copy(pdf_filepath, new_pdf_path)
+            new_pdf_path = Path(staging_location) / p.name
+            # copy the PDF to the staging location
+            shutil.copy(str(p), new_pdf_path)
             pdf_file = PDFFile(new_pdf_path)
 
             # if the PDF is encrypted, raise an error
@@ -219,6 +222,8 @@ class PDFTextExtractor(FileTextExtractor):
                     pdf_text += page_text
 
         if ocr_needed:
-            pdf_text = self.extract_text_with_ocr(new_pdf_path, staging_location)
+            # perform OCR fallback
+            pdf_text = self.extract_text_with_ocr(new_pdf_path)
 
-        return pdf_text
+        # normalize whitespace before returning
+        return normalize_whitespace(pdf_text)

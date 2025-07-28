@@ -1,7 +1,9 @@
 # extracting/extractors.py
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from .extraction_utils import validate_file
 from typing import List
 
 def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtractor:
@@ -103,13 +105,8 @@ class TextFileTextExtractor(FileTextExtractor):
         ValueError
             If the file cannot be read with any of the supported encodings.
         """
-        file_path = Path(path)
-        
-        if not file_path.exists():
-            raise FileNotFoundError(f"Text file not found: {path}")
-        
-        if not file_path.is_file():
-            raise FileNotFoundError(f"Path is not a file: {path}")
+        # validate file path and type
+        file_path = validate_file(path)
         
         # Try different encodings
         for encoding in self.encodings:

@@ -1,14 +1,26 @@
-# Database Models
+# db_models.py
 
+import os
+from pathlib import Path, PurePosixPath
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, SmallInteger, Text, Boolean, Numeric, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from pgvector.sqlalchemy import Vector
+from sqlalchemy import create_engine
+
 
 
 Base = declarative_base()
+
+def get_db_engine():
+    """Create and return a SQLAlchemy engine for the project database."""
+    conn_string = (
+        f"postgresql+psycopg://{os.getenv('PROJECT_DB_USERNAME')}:{os.getenv('PROJECT_DB_PASSWORD')}"
+        f"@{os.getenv('PROJECT_DB_HOST')}:{os.getenv('PROJECT_DB_PORT')}/{os.getenv('PROJECT_DB_NAME')}"
+    )
+    return create_engine(conn_string)
 
 class File(Base):
     """
@@ -73,6 +85,26 @@ class FileLocation(Base):
     # Relationship to files
     file = relationship("File", back_populates="locations")
 
+    def local_filepath(self, server_mount_path: str) -> Path:
+        """
+        Returns the local file path for the given server mount path.
+
+        Args:
+            server_mount_path (str): The base mount path on the local machine.
+        Returns:
+            Path: The local file path, or None if not available.
+        """
+        # if the file_server_directories or filename is None, return None
+        if not self.file_server_directories or not self.filename:
+            return None
+        
+        # if the object has self._local_path attribute, return it
+        if not hasattr(self, '_local_path'):
+            rel_parts = PurePosixPath(self.file_server_directories).parts  # tuple of segments
+            self._local_path = Path(server_mount_path).joinpath(*rel_parts, self.filename)
+
+        return self._local_path
+        
 
 class FilingTag(Base):
     """

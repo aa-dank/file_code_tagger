@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from .extraction_utils import validate_file
+from .extraction_utils import validate_file, strip_html
 from typing import List
+
+import markdown
 
 def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtractor:
     """
@@ -111,7 +113,14 @@ class TextFileTextExtractor(FileTextExtractor):
         # Try different encodings
         for encoding in self.encodings:
             try:
-                with open(file_path, 'r', encoding=encoding) as file:
+                with open(file_path, 'r', encoding=encoding) as file: #TODO:  errors='ignore'?
+                    if file_path.suffix.lower() == ".xml":
+                        return strip_html(file.read(), parser="xml")
+                    
+                    elif file_path.suffix.lower() == ".md":
+                        text = markdown.markdown(file.read())
+                        return strip_html(text, parser="html")
+
                     return file.read()
             except UnicodeDecodeError:
                 continue

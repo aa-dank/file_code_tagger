@@ -335,7 +335,10 @@ class PDFTextExtractor(FileTextExtractor):
             raise e
 
         finally:
-            if doc and not doc.is_closed:
-                doc.close()
-        
+            if doc is not None and not doc.is_closed:
+                try:
+                    doc.close()
+                except Exception as e:
+                    pass
+
         return normalize_whitespace(extracted_text)

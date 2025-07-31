@@ -1,6 +1,6 @@
 # extracting/pdf_extractor.py
 
-import fitz # PyMuPDF for PDF processing
+import fitz
 import ocrmypdf
 import os
 import shutil
@@ -71,12 +71,15 @@ class PDFFile:
 
         with fitz.open(self.path) as doc:
             # if the file is not a PDF, raise an error
-            if doc.is_pdf is False:
+            if not doc.is_pdf:
                 raise ValueError(f"File is not a valid PDF: {self.path}")
+            
             self.page_count = doc.page_count
             self.is_encrypted = doc.is_encrypted
 
         self.name = self.path.stem
+        self.size = self.path.stat().st_size  # size in bytes
+        # cache for properties that are expensive to compute and not used much
         self.property_cache = {}
 
     @staticmethod
@@ -163,26 +166,31 @@ class PDFFile:
             self.property_cache['has_large_format'] = False
 
         return self.property_cache.get('has_large_format', False)
-
-        
     
 
 class PDFTextExtractor(FileTextExtractor):
     """
     Extract text from PDF files with fallback to OCR.
-    
+
     This class implements text extraction from PDF documents. It first attempts
     to extract text directly from the PDF. If no text is found (e.g., in scanned
     documents), it automatically falls back to OCR processing using ocrmypdf.
-    
+
     Attributes
     ----------
+    file_extensions : list
+        Supported file extensions for this extractor.
     ocr_params : dict
         Parameters for OCR processing using ocrmypdf.
+    max_stream_size : int
+        Maximum file size (bytes) to process in memory before using a temp file.
     """
     file_extensions = ['pdf']
 
     def __init__(self):
+        """
+        Initialize PDFTextExtractor with default OCR parameters and stream-size threshold.
+        """
         super().__init__()
         self.ocr_params = {
             'max_image_mpixels': 250,
@@ -195,7 +203,11 @@ class PDFTextExtractor(FileTextExtractor):
             'optimize':1
         }
 
-    def extract_text_with_ocr(self, pdf_path: Union[str, Path]) -> str:
+        # threshold of files which cannot be processed in memory, default is 100 MB
+        self.max_stream_size = 100 * 1024 * 1024
+    
+    @staticmethod
+    def extract_text_with_ocr(pdf_path: Union[str, Path], ocr_params: dict) -> str:
         """
         Perform OCR on a PDF file and return the extracted text.
         
@@ -207,7 +219,9 @@ class PDFTextExtractor(FileTextExtractor):
         ----------
         pdf_path : Union[str, Path]
             Path to the PDF file to be processed with OCR.
-        
+        ocr_params : dict
+            Parameters for the OCR processing.
+
         Returns
         -------
         str
@@ -219,92 +233,109 @@ class PDFTextExtractor(FileTextExtractor):
             If the input PDF file does not exist.
         """
         input_pdf_path = Path(pdf_path)
-        pdf_text = ""
         if not input_pdf_path.exists():
             raise FileNotFoundError(f"Input PDF file not found for OCR operation: {input_pdf_path}")
         
-        # staging location is directory containing the input_pdf_path file
-        staging_location = input_pdf_path.parent
-        output_pdf_path = Path(staging_location) / "ocr_output.pdf"
-        ocr_params = self.ocr_params.copy()
-        
-        # add input and output file paths to the OCR parameters
-        ocr_params['input_file'] = pdf_path
-        ocr_params['output_file'] = output_pdf_path
-        ocrmypdf.ocr(**ocr_params)
+        with tempfile.TemporaryDirectory(prefix="ocr_") as td:
+            # staging location is directory containing the input_pdf_path file
+            output_pdf_path = Path(td) / f"{input_pdf_path.stem}_ocr.pdf"
 
-        with fitz.open(output_pdf_path) as doc:
-            for page in doc:
-                page_text = page.get_text()
-                pdf_text += page_text
+            # add input and output file paths to the OCR parameters
+            params = ocr_params.copy()
+            params['input_file'] = pdf_path
+            params['output_file'] = output_pdf_path
+            ocrmypdf.ocr(**params)
+
+            with fitz.open(output_pdf_path) as doc:
+                return "".join(page.get_text() for page in doc)
+    
+    def _fitz_doc_text(self, fitz_doc: fitz.Document, pdf_document: PDFFile) -> str:
+        """
+        Extract text from a fitz.Document, with fallback to OCR if any page is blank.
+
+        Parameters
+        ----------
+        fitz_doc : fitz.Document
+            Opened PyMuPDF document.
+        pdf_document : PDFFile
+            PDFFile instance for metadata and page count.
+
+        Returns
+        -------
+        str
+            Extracted text, using OCR if necessary.
+        """
+        ocr_needed = False
+        pdf_text = ""
+        for _, page in enumerate(fitz_doc):
+            page_text = page.get_text()
+            
+            # if we are not finding text, we'll attempt ocr
+            if not page_text.strip():
+                ocr_needed = True
+                pdf_text = ""
+                break
+            pdf_text += page_text
+        
+        if not ocr_needed:
+            return pdf_text
+        
+        ocr_params = self.ocr_params.copy()
+        # if no timeout param in ocr_params, set a default based on page count
+        if not ocr_params.get('tesseract_timeout', None):
+            ocr_params['tesseract_timeout'] = min(300, pdf_document.page_count * 45)
+
+        # set the max_image_mpixels if not in ocr_params
+        if not ocr_params.get('max_image_mpixels', None):
+            ocr_params['max_image_mpixels'] = 1000 if pdf_document.has_large_format else 300
+
+        pdf_text = self.extract_text_with_ocr(pdf_path=pdf_document.path, ocr_params=ocr_params)
 
         return pdf_text
 
     def __call__(self, pdf_filepath: str) -> str:
         """
-        Extract text from a PDF file, using OCR if necessary.
-        
-        This method first attempts to extract text directly from the PDF.
-        If a page is found with no extractable text, it switches to OCR processing
-        for the entire document.
-        
+        Extract and normalize text from the specified PDF file.
+
         Parameters
         ----------
         pdf_filepath : str
-            Path to the PDF file from which to extract text.
-            
+            Filesystem path to the PDF to process.
+
         Returns
         -------
         str
-            Extracted text content from the PDF.
-            
-        Raises
-        ------
-        ValueError
-            If the PDF is encrypted and cannot be processed.
-        FileNotFoundError
-            If the PDF file does not exist or is not a valid file.
+            Normalized extracted text.
         """
-        # validate input file
-        p = validate_file(pdf_filepath)
-        pdf_text = ""
-        ocr_needed = False
-        with tempfile.TemporaryDirectory(prefix="text_extractor_") as staging_location:
-            new_pdf_path = Path(staging_location) / p.name
-            # copy the PDF to the staging location
-            shutil.copy(str(p), new_pdf_path)
-            pdf_file = PDFFile(new_pdf_path)
+        doc = None
+        extracted_text = ""
+        try:
+            pdf = PDFFile(validate_file(pdf_filepath))
 
-            # if the PDF is encrypted, raise an error
-            if pdf_file.is_encrypted:
-                raise ValueError(f"PDF file is encrypted and cannot be processed: {pdf_file.path}")
+            # PyMuPDF can open encrypted PDFs only with a password; streaming doesn't help.
+            if pdf.is_encrypted:
+                raise ValueError(f"PDF file is encrypted and cannot be processed: {pdf.path}")
             
-            # if no timeout param in ocr_params, set a default based on page count
-            if not self.ocr_params.get('tesseract_timeout', None):
-                self.ocr_params['tesseract_timeout'] = min(300, pdf_file.page_count * 45)
+            # if the file is small enough, read it into memory
+            if pdf.size <= self.max_stream_size:
+                data = pdf.path.read_bytes()
+                doc = fitz.open(stream=data, filetype="pdf")
+                extracted_text = self._fitz_doc_text(fitz_doc=doc, pdf_document=pdf)
+                doc.close()
 
-            # set the max_image_mpixels if not in ocr_params
-            if not self.ocr_params.get('max_image_mpixels', None):
-                
-                if pdf_file.has_large_format:
-                    self.ocr_params['max_image_mpixels'] = 1000
-                    #self.ocr_params.setdefault("tesseract_config", []).extend(["--psm", "6"])
-                else:
-                    self.ocr_params['max_image_mpixels'] = 300
+            else:
+                with tempfile.TemporaryDirectory(prefix="text_extractor_") as temp_dir:
+                    work_path = Path(temp_dir) / pdf.name
+                    shutil.copy(pdf.path, work_path)
+                    doc = fitz.open(work_path)
+                    extracted_text = self._fitz_doc_text(fitz_doc=doc, pdf_document=pdf)
+                    doc.close()
+        
+        except Exception as e:
+            raise e
 
-            with fitz.open(pdf_file.path) as doc:  # Updated to use the new read method
-                for _, page in enumerate(doc):
-                    page_text = page.get_text()
-                    
-                    # if we are not finding text, we'll attempt ocr
-                    if not page_text.strip():
-                        ocr_needed = True
-                        break
-                    pdf_text += page_text
-
-        if ocr_needed:
-            # perform OCR fallback
-            pdf_text = self.extract_text_with_ocr(new_pdf_path)
-
-        # normalize whitespace before returning
-        return normalize_whitespace(pdf_text)
+        finally:
+            if doc and not doc.is_closed:
+                doc.close()
+        
+        return normalize_whitespace(extracted_text)

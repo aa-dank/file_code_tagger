@@ -104,7 +104,17 @@ class FileLocation(Base):
             self._local_path = Path(server_mount_path).joinpath(*rel_parts, self.filename)
 
         return self._local_path
-        
+    
+    @property
+    def file_size(self) -> int:
+        """
+        Returns the size of the file in bytes by finding the corresponding File object.
+        """
+        file = self.file
+        if file:
+            return file.size
+        return 0
+
 
 class FilingTag(Base):
     """

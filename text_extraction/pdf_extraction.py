@@ -13,77 +13,158 @@ from .extraction_utils import validate_file, normalize_whitespace
 
 class PDFFile:
     """
-    Represents a PDF file and provides methods to access its properties.
+    Represents a PDF file and provides properties and utilities
+    to inspect its content and layout.
 
     Attributes
     ----------
     path : Path
-        The path to the PDF file.
+        Filesystem path to the PDF.
     name : str
-        The name of the PDF file without the extension.
+        File name without its extension.
     page_count : int
-        The number of pages in the PDF file.
-    encrypted : bool
-        Indicates whether the PDF file is encrypted.
-    pages_dims : list of tuples
-        A list of tuples representing the dimensions of each page in inches (width, height).
-    
+        Total number of pages in the document.
+    is_encrypted : bool
+        True if the PDF is encrypted.
+    property_cache : dict
+        Cache for storing computed properties (e.g., page dimensions).
+
     Methods
     -------
-    read() -> fitz.Document
-        Opens the PDF file and returns a fitz.Document object.
+    pt_to_in(pt: float) -> float
+        Convert a measurement from PDF points to inches.
+    _is_large_format_page(w: float, h: float, long_edge_thresh: int = 24,
+                          area_thresh: int = 800) -> bool
+        Determine if a page size in inches exceeds large‐format thresholds.
+
+    Properties
+    ----------
+    pages_dims : List[Tuple[float, float]]
+        List of (width, height) of each page in inches.
+    has_large_format : bool
+        True if any page qualifies as a large‐format page.
     """
     
     def __init__(self, path: str):
-        
-        def pt_to_in(pt: float) -> float:
-            """Converts points to inches."""
-            return pt / 72.0
+        """
+        Initialize a PDFFile instance.
 
+        Parameters
+        ----------
+        path : str
+            Path to the PDF file.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the path does not exist or is not a file.
+        ValueError
+            If the file cannot be opened as a PDF.
+        """
+        self.path = Path(path)
         # if the path doesn't exist or is not a file, raise an error
-        if not Path(path).exists(): 
+        if not self.path.exists(): 
             raise FileNotFoundError(f"PDF file not found: {path}")
 
-        if not Path(path).is_file():
+        if not self.path.is_file():
             raise FileNotFoundError(f"PDF file is not a file: {path}")
 
-        self.path = Path(path)
-        self.name = self.path.stem
-        self.page_count = None
-        self.encrypted = False
-        self.pages_dims = []
-        with self.read() as doc:
-            
+        with fitz.open(self.path) as doc:
             # if the file is not a PDF, raise an error
             if doc.is_pdf is False:
                 raise ValueError(f"File is not a valid PDF: {self.path}")
-
             self.page_count = doc.page_count
-            self.encrypted = doc.is_encrypted
-            self.pages_dims = [(pt_to_in(page.rect.width), pt_to_in(page.rect.height)) for page in doc]
+            self.is_encrypted = doc.is_encrypted
+
+        self.name = self.path.stem
+        self.property_cache = {}
 
     @staticmethod
     def _is_large_format_page(w, h, long_edge_thresh=24, area_thresh=800):
+        """
+        Check if a page size exceeds defined large-format thresholds.
+
+        Parameters
+        ----------
+        w : float
+            Width of the page in inches.
+        h : float
+            Height of the page in inches.
+        long_edge_thresh : int, optional
+            Minimum longer-edge length to consider large format (default=24).
+        area_thresh : int, optional
+            Minimum page area in square inches to consider large format (default=800).
+
+        Returns
+        -------
+        bool
+            True if page is large format, False otherwise.
+        """
         long_edge = max(w, h)
         area = w * h
         return long_edge >= long_edge_thresh or area >= area_thresh
     
-    @property
-    def has_large_format(self) -> bool:
-        if not hasattr(self, '_has_large_format_pages'):
-            self._has_large_format_pages = any(self._is_large_format_page(w, h) for w, h in self.pages_dims)
-        return self._has_large_format_pages
-
-    def read(self) -> fitz.Document:
+    @staticmethod
+    def pt_to_in(pt: float) -> float:
         """
-        Open the PDF file and return the document object.
+        Convert points to inches.
+        
+        Parameters
+        ----------
+        pt : float
+            Value in points to convert.
         
         Returns
         -------
-        fitz.Document
-            The opened PDF document.
+        float
+            Value in inches.
         """
-        return fitz.open(self.path)
+        return pt / 72.0
+
+    @property
+    def pages_dims(self) -> list:
+        """
+        Returns the dimensions of each page in inches.
+        
+        Returns
+        -------
+        list of tuples
+            A list of tuples where each tuple contains the width and height of a page in inches.
+        """
+        if 'pages_dims' in self.property_cache:
+            return self.property_cache['pages_dims']
+        
+        with fitz.open(self.path) as doc:
+            dims = [(self.pt_to_in(page.rect.width), self.pt_to_in(page.rect.height)) for page in doc]
+            self.property_cache['pages_dims'] = dims
+        
+        return self.property_cache['pages_dims']
+
+    @property
+    def has_large_format(self) -> bool:
+        """
+        Determine if any page in the PDF is large format.
+
+        Returns
+        -------
+        bool
+            True if at least one page qualifies as large format.
+        """
+        #if propert_cache has the value, return it
+        if 'has_large_format' in self.property_cache:
+            return self.property_cache['has_large_format']
+        
+        for w, h in self.pages_dims:
+            if self._is_large_format_page(w, h):
+                self.property_cache['has_large_format'] = True
+                break
+
+        if not 'has_large_format' in self.property_cache:
+            self.property_cache['has_large_format'] = False
+
+        return self.property_cache.get('has_large_format', False)
+
+        
     
 
 class PDFTextExtractor(FileTextExtractor):
@@ -195,7 +276,7 @@ class PDFTextExtractor(FileTextExtractor):
             pdf_file = PDFFile(new_pdf_path)
 
             # if the PDF is encrypted, raise an error
-            if pdf_file.encrypted:
+            if pdf_file.is_encrypted:
                 raise ValueError(f"PDF file is encrypted and cannot be processed: {pdf_file.path}")
             
             # if no timeout param in ocr_params, set a default based on page count
@@ -211,8 +292,8 @@ class PDFTextExtractor(FileTextExtractor):
                 else:
                     self.ocr_params['max_image_mpixels'] = 300
 
-            with pdf_file.read() as doc:  # Updated to use the new read method
-                for page_num, page in enumerate(doc):
+            with fitz.open(pdf_file.path) as doc:  # Updated to use the new read method
+                for _, page in enumerate(doc):
                     page_text = page.get_text()
                     
                     # if we are not finding text, we'll attempt ocr

@@ -39,7 +39,7 @@ class ImageTextExtractor(FileTextExtractor):
         lang : str
             Tesseract language(s). e.g. "eng+spa".
         tesseract_cmd : str | None
-            Full path to tesseract.exe if not on PATH.
+            Full path to tesseract.exe if not on PATH. (eg r"C:\Program Files\Tesseract-OCR\tesseract.exe")
         psm : int
             Page segmentation mode. 3 = fully automatic, 6 = assume uniform blocks of text.
         oem : int

@@ -72,16 +72,16 @@ class WordFileTextExtractor(FileTextExtractor):
         return "\n".join(parts)
 
     def _extract_legacy(self, path: str, ext: str) -> str:
+        # For RTF files, bypass COM to avoid potential hangs and use striprtf directly
+        if ext == "rtf":
+            with open(path, "r", encoding="latin-1", errors="ignore") as f:
+                return rtf_to_text(f.read())
+
         if self.use_word_com:
             try:
                 return self._word_com_to_txt(path)
             except Exception:
                 pass  # fall back
-
-        # Fallbacks
-        if ext == "rtf":
-            with open(path, "r", encoding="latin-1", errors="ignore") as f:
-                return rtf_to_text(f.read())
 
         if self.pandoc_path:
             return self._pandoc_to_txt(path)

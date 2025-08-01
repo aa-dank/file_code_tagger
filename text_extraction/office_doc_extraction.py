@@ -36,7 +36,26 @@ class WordFileTextExtractor(FileTextExtractor):
 
     def __call__(self, path: str) -> str:
         """
-        Determine extraction method and normalize text.
+        Determine extraction method for a Word document and return normalized text.
+
+        Parameters
+        ----------
+        path : str
+            Path to the Word (.docx, .docm, .doc) or RTF file.
+
+        Returns
+        -------
+        str
+            Extracted and whitespace-normalized text content.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the input file does not exist.
+        ValueError
+            If the file extension is unsupported.
+        RuntimeError
+            If no extraction method succeeds for legacy formats.
         """
         # validate input file
         p = validate_file(path)
@@ -51,6 +70,21 @@ class WordFileTextExtractor(FileTextExtractor):
 
     # ---------- helpers ----------
     def _extract_docx(self, path: str) -> str:
+        """
+        Extract text from a DOCX/DOCM file.
+
+        Tries mammoth to convert to Markdown, falling back to python-docx.
+
+        Parameters
+        ----------
+        path : str
+            Path to the DOCX/DOCM file.
+
+        Returns
+        -------
+        str
+            Raw extracted text or markdown from the document.
+        """
         if self.use_mammoth:
             try:
                 with open(path, "rb") as f:
@@ -72,6 +106,28 @@ class WordFileTextExtractor(FileTextExtractor):
         return "\n".join(parts)
 
     def _extract_legacy(self, path: str, ext: str) -> str:
+        """
+        Extract text from legacy Word formats (DOC, RTF).
+
+        RTF uses striprtf; DOC uses COM or pandoc fallback.
+
+        Parameters
+        ----------
+        path : str
+            Path to the legacy file (.doc or .rtf).
+        ext : str
+            File extension without the dot ('doc' or 'rtf').
+
+        Returns
+        -------
+        str
+            Extracted text content.
+
+        Raises
+        ------
+        RuntimeError
+            If no viable extraction method is available.
+        """
         # For RTF files, bypass COM to avoid potential hangs and use striprtf directly
         if ext == "rtf":
             with open(path, "r", encoding="latin-1", errors="ignore") as f:
@@ -91,6 +147,21 @@ class WordFileTextExtractor(FileTextExtractor):
     def _word_com_to_txt(self, path: str) -> str:
         """
         Use Microsoft Word via COM to SaveAs TXT, then read.
+
+        Parameters
+        ----------
+        path : str
+            Path to the Word document.
+
+        Returns
+        -------
+        str
+            Extracted text content.
+
+        Raises
+        ------
+        pythoncom.com_error
+            If there is an error with COM automation.
         """
         # Constants from Word Object Model (avoid importing win32com.constants each call)
         wdFormatText = 2
@@ -112,6 +183,24 @@ class WordFileTextExtractor(FileTextExtractor):
         return txt
 
     def _pandoc_to_txt(self, path: str) -> str:
+        """
+        Convert a document to plain text via Pandoc.
+
+        Parameters
+        ----------
+        path : str
+            Path to the input file to convert.
+
+        Returns
+        -------
+        str
+            Text extracted from the pandoc-converted file.
+
+        Raises
+        ------
+        subprocess.CalledProcessError
+            If the pandoc command fails.
+        """
         import subprocess, tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as tmp:
             out = tmp.name
@@ -143,6 +232,19 @@ class SpreadsheetTextExtractor(FileTextExtractor):
         self.delimiter = delimiter
 
     def __call__(self, path: str) -> str:
+        """
+        Read and normalize text from spreadsheet or delimited files.
+
+        Parameters
+        ----------
+        path : str
+            Path to the spreadsheet (.xlsx, .xls, .ods, .csv, .tsv, etc.) file.
+
+        Returns
+        -------
+        str
+            Extracted and whitespace-normalized text content.
+        """
         # validate input file
         p = validate_file(path)
         ext = p.suffix.lower().lstrip('.')
@@ -156,12 +258,42 @@ class SpreadsheetTextExtractor(FileTextExtractor):
     # ------------- helpers -------------
 
     def _read_delimited(self, p: Path, ext: str) -> str:
+        """
+        Read plain text from CSV or TSV files.
+
+        Parameters
+        ----------
+        p : Path
+            Path object to the delimited file.
+        ext : str
+            Extension without dot ('csv' or 'tsv').
+
+        Returns
+        -------
+        str
+            Raw file content.
+        """
         sep = "\t" if ext == "tsv" else ","
         with open(p, "r", encoding="utf-8", errors="ignore") as f:
             text = f.read()
         return text
 
     def _read_excel_like(self, p: Path, ext: str) -> str:
+        """
+        Extract text from binary spreadsheet formats via pandas.
+
+        Parameters
+        ----------
+        p : Path
+            Path to the spreadsheet file.
+        ext : str
+            Extension without dot (e.g., 'xls', 'xlsx', 'ods').
+
+        Returns
+        -------
+        str
+            Combined text content from selected sheets.
+        """
         # choose engine
         engine = self._pick_engine(ext)
 
@@ -186,6 +318,21 @@ class SpreadsheetTextExtractor(FileTextExtractor):
         return "\n\n".join(parts)
 
     def _df_to_text(self, df: pd.DataFrame, sheet: str) -> str:
+        """
+        Serialize a pandas DataFrame to text with optional headers.
+
+        Parameters
+        ----------
+        df : pandas.DataFrame
+            DataFrame containing worksheet data.
+        sheet : str
+            Name of the sheet being processed.
+
+        Returns
+        -------
+        str
+            Tab-delimited text block with sheet name header.
+        """
         # Optionally drop completely empty cols/rows
         df = df.dropna(how="all").dropna(axis=1, how="all")
 
@@ -203,6 +350,21 @@ class SpreadsheetTextExtractor(FileTextExtractor):
     def _pick_engine(self, ext: str) -> str:
         """
         Decide which pandas engine to use based on extension and what’s installed.
+
+        Parameters
+        ----------
+        ext : str
+            File extension (e.g., 'xlsx', 'xls').
+
+        Returns
+        -------
+        str
+            Engine name for pandas ExcelFile (e.g., 'openpyxl', 'xlrd').
+
+        Raises
+        ------
+        ImportError
+            If the required engine is not installed and cannot be used.
         """
         if ext in ("xlsx", "xlsm"):
             return "openpyxl"
@@ -236,7 +398,7 @@ class PresentationTextExtractor(FileTextExtractor):
 
     Strategy:
     - For pptx/pptm/ppsx: python-pptx
-    - For ppt/pps/odp: convert -> pptx or txt via COM or LibreOffice, then parse
+    - For ppt/pps/odp:    convert → pptx or txt via COM or LibreOffice, then parse
     """
     file_extensions: List[str] = ["pptx", "pptm", "ppsx", "ppt", "pps", "odp"]
 
@@ -253,6 +415,19 @@ class PresentationTextExtractor(FileTextExtractor):
         self.pandoc_path = pandoc_path
 
     def __call__(self, path: str) -> str:
+        """
+        Extract and normalize text from presentation files.
+
+        Parameters
+        ----------
+        path : str
+            Path to the presentation file (.pptx, .ppt, .odp, etc.).
+
+        Returns
+        -------
+        str
+            Extracted and whitespace-normalized text content.
+        """
         # validate input file
         p = validate_file(path)
         ext = p.suffix.lower().lstrip('.')
@@ -271,6 +446,19 @@ class PresentationTextExtractor(FileTextExtractor):
 
     # ---------- pptx path ----------
     def _extract_pptx(self, path: str) -> str:
+        """
+        Extract text from PPTX/PPTM/PPSX using python-pptx.
+
+        Parameters
+        ----------
+        path : str
+            Path to the .pptx/.pptm/.ppsx file.
+
+        Returns
+        -------
+        str
+            Combined slide and (optionally) master text.
+        """
         from pptx import Presentation
         prs = Presentation(path)
 
@@ -301,6 +489,19 @@ class PresentationTextExtractor(FileTextExtractor):
         return "\n\n".join(parts)
 
     def _shape_text(self, shape) -> str:
+        """
+        Retrieve text content from a slide shape.
+
+        Parameters
+        ----------
+        shape : pptx.shapes.base.BaseShape
+            A shape object from a python-pptx slide.
+
+        Returns
+        -------
+        str
+            Extracted text, multi-line for tables or grouped shapes.
+        """
         # text frame
         if hasattr(shape, "text_frame") and shape.text_frame:
             return "\n".join([p.text for p in shape.text_frame.paragraphs if p.text.strip()])
@@ -322,6 +523,19 @@ class PresentationTextExtractor(FileTextExtractor):
         return ""
 
     def _master_text(self, prs) -> str:
+        """
+        Extract text from master slides in a presentation.
+
+        Parameters
+        ----------
+        prs : pptx.presentation.Presentation
+            python-pptx Presentation instance.
+
+        Returns
+        -------
+        str
+            Text content from all master slides.
+        """
         buf = io.StringIO()
         buf.write("=== Master Slides ===\n")
         for master in prs.slide_masters:
@@ -336,6 +550,24 @@ class PresentationTextExtractor(FileTextExtractor):
         """
         Return a Path to a .pptx or .txt temp file after conversion.
         Attempt COM (Windows), else LibreOffice, else Pandoc (txt).
+
+        Parameters
+        ----------
+        path : str
+            Path to the source presentation file.
+
+        ext : str
+            File extension of the source file (e.g., 'ppt', 'pps').
+
+        Returns
+        -------
+        Path
+            Path to the converted .pptx or .txt file.
+
+        Raises
+        ------
+        RuntimeError
+            If conversion fails and no valid output is produced.
         """
         # Try COM first
         if self.use_com and ext in ("ppt", "pps"):
@@ -361,6 +593,24 @@ class PresentationTextExtractor(FileTextExtractor):
         raise RuntimeError(f"Cannot convert {path}. Install PowerPoint, LibreOffice, or Pandoc.")
 
     def _ppt_com_to_pptx(self, path: str) -> Path:
+        """
+        Convert legacy PPT/PPS to PPTX via Windows PowerPoint COM.
+
+        Parameters
+        ----------
+        path : str
+            Path to the .ppt/.pps file.
+
+        Returns
+        -------
+        Path
+            Path to the newly created temporary .pptx file.
+
+        Raises
+        ------
+        Exception
+            If the COM automation fails.
+        """
         import pythoncom
         import win32com.client
         pythoncom.CoInitialize()
@@ -378,6 +628,26 @@ class PresentationTextExtractor(FileTextExtractor):
         return out_path
 
     def _libreoffice_convert(self, src: str, fmt: str) -> Path:
+        """
+        Convert a file using LibreOffice headless mode.
+
+        Parameters
+        ----------
+        src : str
+            Source file path.
+        fmt : str
+            Desired output format (e.g., 'pptx').
+
+        Returns
+        -------
+        Path
+            Path to the converted file in a temp directory.
+
+        Raises
+        ------
+        subprocess.CalledProcessError
+            If the LibreOffice command fails.
+        """
         import subprocess, tempfile
         outdir = Path(tempfile.mkdtemp())
         cmd = [self.soffice_path, "--headless", "--convert-to", fmt, "--outdir", str(outdir), src]
@@ -385,6 +655,24 @@ class PresentationTextExtractor(FileTextExtractor):
         return next(outdir.glob(f"{Path(src).stem}*.{fmt}"))
 
     def _pandoc_to_txt(self, src: str) -> Path:
+        """
+        Fallback conversion of a presentation file to plain text via Pandoc.
+
+        Parameters
+        ----------
+        src : str
+            Source file path.
+
+        Returns
+        -------
+        Path
+            Path to the .txt file created by Pandoc.
+
+        Raises
+        ------
+        subprocess.CalledProcessError
+            If the pandoc command fails.
+        """
         import subprocess, tempfile
         out = Path(tempfile.mkdtemp()) / (Path(src).stem + ".txt")
         cmd = [self.pandoc_path, src, "-t", "plain", "-o", str(out)]

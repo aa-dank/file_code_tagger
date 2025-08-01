@@ -147,67 +147,35 @@ class WordFileTextExtractor(FileTextExtractor):
     def _word_com_to_txt(self, path: str) -> str:
         """
         Use Microsoft Word via COM to SaveAs TXT, then read.
-
-        Parameters
-        ----------
-        path : str
-            Path to the Word document.
-
-        Returns
-        -------
-        str
-            Extracted text content.
-
-        Raises
-        ------
-        pythoncom.com_error
-            If there is an error with COM automation.
         """
         # Constants from Word Object Model (avoid importing win32com.constants each call)
         wdFormatText = 2
-        pythoncom.CoInitialize()
-        word = win32com.client.DispatchEx("Word.Application")
-        word.Visible = False
-        txt = ""
-        try:
-            doc = word.Documents.Open(Path(path).absolute().__str__(), ReadOnly=True)
+        # Use the com_app context manager for CoInitialize/CoUninitialize
+        with com_app("Word.Application", visible=False) as word:
+            try:
+                word.DisplayAlerts = 0
+            except AttributeError:
+                pass
+            doc = word.Documents.Open(
+                str(Path(path).absolute()),
+                ConfirmConversions=False,
+                ReadOnly=True,
+                AddToRecentFiles=False,
+                Visible=False,
+                Revert=False
+            )
             with tempfile.TemporaryDirectory() as td:
                 out_txt = Path(td) / (Path(path).stem + ".txt")
-                doc.SaveAs2(str(out_txt), FileFormat=wdFormatText, Encoding=65001)  # UTF-8
+                doc.SaveAs2(str(out_txt), FileFormat=wdFormatText, Encoding=65001)
                 doc.Close()
-                with open(out_txt, "r", encoding="utf-8", errors="ignore") as f:
-                    txt = f.read()
-        finally:
-            word.Quit()
-            pythoncom.CoUninitialize()
-        return txt
+                return out_txt.read_text(encoding="utf-8", errors="ignore")
 
     def _pandoc_to_txt(self, path: str) -> str:
         """
-        Convert a document to plain text via Pandoc.
-
-        Parameters
-        ----------
-        path : str
-            Path to the input file to convert.
-
-        Returns
-        -------
-        str
-            Text extracted from the pandoc-converted file.
-
-        Raises
-        ------
-        subprocess.CalledProcessError
-            If the pandoc command fails.
+        Convert a document to plain text via Pandoc using run_pandoc helper.
         """
-        import subprocess, tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as tmp:
-            out = tmp.name
-        cmd = [self.pandoc_path, path, "-t", "plain", "-o", out]
-        subprocess.run(cmd, check=True)
-        with open(out, "r", encoding="utf-8", errors="ignore") as f:
-            return f.read()
+        out = run_pandoc(path, self.pandoc_path, to_format="plain")
+        return out.read_text(encoding="utf-8", errors="ignore")
 
 
 class SpreadsheetTextExtractor(FileTextExtractor):
@@ -594,38 +562,15 @@ class PresentationTextExtractor(FileTextExtractor):
 
     def _ppt_com_to_pptx(self, path: str) -> Path:
         """
-        Convert legacy PPT/PPS to PPTX via Windows PowerPoint COM.
-
-        Parameters
-        ----------
-        path : str
-            Path to the .ppt/.pps file.
-
-        Returns
-        -------
-        Path
-            Path to the newly created temporary .pptx file.
-
-        Raises
-        ------
-        Exception
-            If the COM automation fails.
+        Convert legacy PPT/PPS to PPTX via PowerPoint COM using com_app.
         """
-        import pythoncom
-        import win32com.client
-        pythoncom.CoInitialize()
-        powerpoint = win32com.client.DispatchEx("PowerPoint.Application")
-        powerpoint.Visible = 0
-        tempdir = Path(tempfile.mkdtemp())
-        out_path = tempdir / (Path(path).stem + ".pptx")
-        try:
+        with com_app("PowerPoint.Application", visible=False) as powerpoint:
+            tempdir = Path(tempfile.mkdtemp())
+            out_path = tempdir / (Path(path).stem + ".pptx")
             pres = powerpoint.Presentations.Open(str(Path(path).absolute()), WithWindow=False)
             pres.SaveAs(str(out_path), 24)  # ppSaveAsOpenXMLPresentation = 24
             pres.Close()
-        finally:
-            powerpoint.Quit()
-            pythoncom.CoUninitialize()
-        return out_path
+            return out_path
 
     def _libreoffice_convert(self, src: str, fmt: str) -> Path:
         """
@@ -673,8 +618,4 @@ class PresentationTextExtractor(FileTextExtractor):
         subprocess.CalledProcessError
             If the pandoc command fails.
         """
-        import subprocess, tempfile
-        out = Path(tempfile.mkdtemp()) / (Path(src).stem + ".txt")
-        cmd = [self.pandoc_path, src, "-t", "plain", "-o", str(out)]
-        subprocess.run(cmd, check=True)
-        return out
+        return run_pandoc(src, self.pandoc_path, to_format="plain")

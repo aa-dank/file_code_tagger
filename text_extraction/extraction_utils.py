@@ -1,16 +1,17 @@
 # text_extraction/extraction_utils.py
 
 # --- imports ---
-from pathlib import Path
-import re
+import logging
+import pythoncom
 import subprocess
 import tempfile
 import unicodedata
-from contextlib import contextmanager
-
-import pythoncom
 import win32com.client
 from bs4 import BeautifulSoup
+from contextlib import contextmanager
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 try:
     from unidecode import unidecode  # nicer fallback for weird glyphs

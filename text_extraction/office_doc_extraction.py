@@ -1,22 +1,19 @@
 # extracting/msft_extractor.py
 
-# Standard library imports
 import io
+import logging
+import mammoth
 import tempfile
+import pandas as pd
 from pathlib import Path
 from typing import List
-
-# Third-party imports
-import pandas as pd
-import pythoncom
-import win32com.client
 from docx import Document
-import mammoth
 from striprtf.striprtf import rtf_to_text
 
-# Local imports
 from .basic_extraction import FileTextExtractor
 from .extraction_utils import validate_file, normalize_whitespace, run_pandoc, com_app
+
+logger = logging.getLogger(__name__)
 
 class WordFileTextExtractor(FileTextExtractor):
     """

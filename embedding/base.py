@@ -1,8 +1,11 @@
 # embedding/base.py  –– Base class for embedding models
 
+import logging
 import numpy as np
 from typing import List, Sequence
 from abc import ABC, abstractmethod
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingModel(ABC):

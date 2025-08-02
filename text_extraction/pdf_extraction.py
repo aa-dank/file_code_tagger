@@ -1,6 +1,7 @@
 # extracting/pdf_extractor.py
 
 import fitz
+import logging
 import ocrmypdf
 import os
 import shutil
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Union
 from .basic_extraction import FileTextExtractor
 from .extraction_utils import validate_file, normalize_whitespace
+
+logger = logging.getLogger(__name__)
 
 class PDFFile:
     """

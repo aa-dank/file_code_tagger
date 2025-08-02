@@ -1,12 +1,13 @@
 # extracting/image_extractor.py
-
-from __future__ import annotations
+import logging
+import pytesseract
+import re
 from typing import List
 from pathlib import Path
-
-import pytesseract
 from PIL import Image, ImageOps, ImageSequence
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 try:
     import cv2  # optional for better preprocessing
@@ -20,9 +21,11 @@ from .basic_extraction import FileTextExtractor
 class ImageTextExtractor(FileTextExtractor):
     """
     OCR text from image files using Tesseract (via pytesseract).
+
+    Supports automatic orientation correction via Tesseract OSD,
+    plus optional light pre-processing for better OCR on scans/phone pics.
     
     Supports: PNG, JPG/JPEG, TIFF, BMP, GIF (first frame), HEIC (if pillow-heif installed).
-    Optionally applies light pre-processing for better OCR on scans/phone pics.
     """
     file_extensions: List[str] = ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif"]
 
@@ -66,6 +69,8 @@ class ImageTextExtractor(FileTextExtractor):
         images = self._load_images(p)
         texts = []
         for img in images:
+            # detect and correct orientation
+            img = self.detect_and_correct_orientation(img)
             if self.preprocess:
                 img = self._preprocess(img)
             cfg = f"--psm {self.psm} --oem {self.oem}"
@@ -75,7 +80,6 @@ class ImageTextExtractor(FileTextExtractor):
         return "\n".join(texts)
 
     # ---------- helpers ----------
-
     def _load_images(self, path: Path) -> List[Image.Image]:
         """Handle multi-page TIFFs and GIFs gracefully."""
         imgs = []
@@ -115,6 +119,18 @@ class ImageTextExtractor(FileTextExtractor):
             # Simple point threshold
             img = img.point(lambda x: 255 if x > 200 else 0)
             return img
+
+    def detect_and_correct_orientation(self, pil_img: Image.Image) -> Image.Image:
+        """
+        Use Tesseract OSD to detect rotation and counter-rotate image upright.
+        """
+        osd = pytesseract.image_to_osd(pil_img)
+        rot_match = re.search(r"Rotate: (\d+)", osd)
+        if rot_match:
+            angle = int(rot_match.group(1))
+            if angle != 0:
+                pil_img = pil_img.rotate(360 - angle, expand=True)
+        return pil_img
 
 
 # Small utility so we can extend config easily

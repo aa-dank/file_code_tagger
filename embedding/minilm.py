@@ -1,8 +1,11 @@
 # embedding/minilm.py  –– MiniLM embedding model using SentenceTransformer
 
+import logging
+import numpy as np
 from .base import EmbeddingModel
 from sentence_transformers import SentenceTransformer
-import numpy as np
+
+logger = logging.getLogger(__name__)
 
 class MiniLMEmbedder(EmbeddingModel):
     """

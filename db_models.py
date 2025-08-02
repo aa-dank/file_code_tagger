@@ -1,5 +1,6 @@
 # db_models.py
 
+import logging
 import os
 from pathlib import Path, PurePosixPath
 from pgvector.sqlalchemy import Vector
@@ -9,6 +10,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy import create_engine
+
+logger = logging.getLogger(__name__)
 
 
 

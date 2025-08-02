@@ -1,12 +1,13 @@
 # extracting/extractors.py
-from __future__ import annotations
 
+import logging
+import markdown
 from abc import ABC, abstractmethod
 from pathlib import Path
 from .extraction_utils import validate_file, strip_html
 from typing import List
 
-import markdown
+logger = logging.getLogger(__name__)
 
 def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtractor:
     """

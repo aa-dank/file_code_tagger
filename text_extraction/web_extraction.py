@@ -1,13 +1,15 @@
 # extracting/web_extractor.py
 
+import email
+import logging
 from pathlib import Path
 from typing import List
-from bs4 import BeautifulSoup
-import email
 from email import policy
 
 from .basic_extraction import FileTextExtractor
 from .extraction_utils import validate_file, strip_html
+
+logger = logging.getLogger(__name__)
 
 class HtmlTextExtractor(FileTextExtractor):
     """

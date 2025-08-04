@@ -9,33 +9,6 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 
-def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtractor:
-    """
-    Determine the appropriate extractor for a given file based on its extension.
-
-    Parameters
-    ----------
-    file_path : str
-        Path to the file to be processed.
-    extractors : list
-        List of extractor instances.
-
-    Returns
-    -------
-    FileTextExtractor
-        The extractor instance that matches the file extension.
-
-    Raises
-    ------
-    ValueError
-        If no extractor matches the file extension.
-    """
-    file_extension = Path(file_path).suffix.lower().lstrip(".")
-    for extractor in extractors:
-        if file_extension in extractor.file_extensions:
-            return extractor
-    raise ValueError(f"No extractor found for file extension: {file_extension}")
-
 class FileTextExtractor(ABC):
     """
     Abstract base class for text extraction from different file types.
@@ -128,3 +101,30 @@ class TextFileTextExtractor(FileTextExtractor):
         
         # If we get here, none of the encodings worked
         raise ValueError(f"Unable to read file with supported encodings: {path}")
+    
+def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtractor:
+    """
+    Determine the appropriate extractor for a given file based on its extension.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the file to be processed.
+    extractors : list
+        List of extractor instances.
+
+    Returns
+    -------
+    FileTextExtractor
+        The extractor instance that matches the file extension.
+
+    Raises
+    ------
+    ValueError
+        If no extractor matches the file extension.
+    """
+    file_extension = Path(file_path).suffix.lower().lstrip(".")
+    for extractor in extractors:
+        if file_extension in extractor.file_extensions:
+            return extractor
+    raise ValueError(f"No extractor found for file extension: {file_extension}")

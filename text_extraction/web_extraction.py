@@ -66,10 +66,13 @@ class HtmlTextExtractor(FileTextExtractor):
         FileNotFoundError
             If the file does not exist or is not a valid file.
         """
+        logger.info(f"Extracting text from HTML file: {path}")
         # validate file existence and type
         p = validate_file(path)
+        logger.debug(f"Validated HTML file path: {p}")
 
         ext = p.suffix.lower().lstrip(".")
+        logger.debug(f"HTML file extension detected: {ext}")
         if ext in ("mhtml", "mht"):
             html = self._extract_from_mhtml(p)
         else:
@@ -156,9 +159,11 @@ class EmailTextExtractor(FileTextExtractor):
         FileNotFoundError
             If the file does not exist or is not a valid file.
         """
+        logger.info(f"Extracting text from email file: {path}")
         # validate file
         from .extraction_utils import validate_file, strip_html, normalize_whitespace
         p = validate_file(path)
+        logger.debug(f"Validated email file path: {p}")
 
         with open(p, "rb") as f:
             msg = email.message_from_binary_file(f, policy=policy.default)

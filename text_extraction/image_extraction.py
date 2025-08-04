@@ -62,19 +62,24 @@ class ImageTextExtractor(FileTextExtractor):
         self.max_side = max_side
 
     def __call__(self, path: str) -> str:
+        logger.info(f"Extracting text from image: {path}")
         p = Path(path)
         if not p.exists():
             raise FileNotFoundError(path)
 
         images = self._load_images(p)
+        logger.debug(f"Loaded {len(images)} image frames for OCR")
         texts = []
         for img in images:
             # detect and correct orientation
             img = self.detect_and_correct_orientation(img)
+            logger.debug("Applied orientation correction")
             if self.preprocess:
                 img = self._preprocess(img)
+                logger.debug("Applied preprocessing to image")
             cfg = f"--psm {self.psm} --oem {self.oem}"
             txt = pytesseract.image_to_string(img, lang=self.lang, config=config_str(cfg))
+            logger.debug(f"Extracted text length: {len(txt)} characters")
             texts.append(txt)
 
         return "\n".join(texts)
@@ -82,6 +87,7 @@ class ImageTextExtractor(FileTextExtractor):
     # ---------- helpers ----------
     def _load_images(self, path: Path) -> List[Image.Image]:
         """Handle multi-page TIFFs and GIFs gracefully."""
+        logger.debug(f"Loading images from path: {path}")
         imgs = []
         with Image.open(path) as im:
             try:
@@ -93,10 +99,12 @@ class ImageTextExtractor(FileTextExtractor):
         # Resize if gigantic
         out = []
         for img in imgs:
+            logger.debug(f"Original image size: {img.size}")
             if max(img.size) > self.max_side:
                 scale = self.max_side / max(img.size)
                 new_sz = (int(img.width * scale), int(img.height * scale))
                 img = img.resize(new_sz, Image.LANCZOS)
+                logger.debug(f"Resized image to: {new_sz}")
             out.append(img)
         return out
 
@@ -106,6 +114,7 @@ class ImageTextExtractor(FileTextExtractor):
           - convert to grayscale
           - optional OpenCV adaptive threshold / denoise if available
         """
+        logger.debug("Starting preprocessing of image, _HAS_CV2=%s", _HAS_CV2)
         if _HAS_CV2:
             img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY)
             # adaptive threshold helps on uneven lighting
@@ -125,11 +134,13 @@ class ImageTextExtractor(FileTextExtractor):
         Use Tesseract OSD to detect rotation and counter-rotate image upright.
         """
         osd = pytesseract.image_to_osd(pil_img)
+        logger.debug(f"OSD output: {osd.strip()}")
         rot_match = re.search(r"Rotate: (\d+)", osd)
         if rot_match:
             angle = int(rot_match.group(1))
             if angle != 0:
                 pil_img = pil_img.rotate(360 - angle, expand=True)
+                logger.info(f"Rotated image by {360-angle} degrees to correct orientation")
         return pil_img
 
 

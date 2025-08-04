@@ -54,9 +54,12 @@ class WordFileTextExtractor(FileTextExtractor):
         RuntimeError
             If no extraction method succeeds for legacy formats.
         """
+        logger.info(f"Extracting text from Word file: {path}")
         # validate input file
         p = validate_file(path)
+        logger.debug(f"Validated Word file path: {p}")
         ext = p.suffix.lower().lstrip('.')
+        logger.debug(f"Word file extension detected: {ext}")
         if ext in ("docx", "docm"):
             text = self._extract_docx(str(p))
         elif ext in ("doc", "rtf"):
@@ -210,9 +213,12 @@ class SpreadsheetTextExtractor(FileTextExtractor):
         str
             Extracted and whitespace-normalized text content.
         """
+        logger.info(f"Extracting text from spreadsheet: {path}")
         # validate input file
         p = validate_file(path)
+        logger.debug(f"Validated spreadsheet path: {p}")
         ext = p.suffix.lower().lstrip('.')
+        logger.debug(f"Spreadsheet file extension detected: {ext}")
         if ext in ("csv", "tsv"):
             text = self._read_delimited(p, ext)
         else:
@@ -393,9 +399,12 @@ class PresentationTextExtractor(FileTextExtractor):
         str
             Extracted and whitespace-normalized text content.
         """
+        logger.info(f"Extracting text from presentation: {path}")
         # validate input file
         p = validate_file(path)
+        logger.debug(f"Validated presentation file path: {p}")
         ext = p.suffix.lower().lstrip('.')
+        logger.debug(f"Presentation file extension detected: {ext}")
 
         if ext in ("pptx", "pptm", "ppsx"):
             text = self._extract_pptx(str(p))

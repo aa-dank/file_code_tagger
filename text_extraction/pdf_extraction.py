@@ -64,21 +64,26 @@ class PDFFile:
         ValueError
             If the file cannot be opened as a PDF.
         """
+        logger.debug(f"Initializing PDFFile for path: {path}")
         self.path = Path(path)
         # if the path doesn't exist or is not a file, raise an error
         if not self.path.exists(): 
+            logger.error(f"PDF file not found: {self.path}")
             raise FileNotFoundError(f"PDF file not found: {path}")
 
         if not self.path.is_file():
+            logger.error(f"PDF path is not a file: {self.path}")
             raise FileNotFoundError(f"PDF file is not a file: {path}")
 
         with fitz.open(self.path) as doc:
             # if the file is not a PDF, raise an error
             if not doc.is_pdf:
+                logger.error(f"File is not a valid PDF: {self.path}")
                 raise ValueError(f"File is not a valid PDF: {self.path}")
             
             self.page_count = doc.page_count
             self.is_encrypted = doc.is_encrypted
+        logger.debug(f"PDFFile {self.path} has {self.page_count} pages; encrypted={self.is_encrypted}")
 
         self.name = self.path.stem
         self.size = self.path.stat().st_size  # size in bytes
@@ -139,6 +144,7 @@ class PDFFile:
         """
         if 'pages_dims' in self.property_cache:
             return self.property_cache['pages_dims']
+        logger.debug(f"Computing pages dimensions for {self.path}")
         
         with fitz.open(self.path) as doc:
             dims = [(self.pt_to_in(page.rect.width), self.pt_to_in(page.rect.height)) for page in doc]
@@ -160,8 +166,10 @@ class PDFFile:
         if 'has_large_format' in self.property_cache:
             return self.property_cache['has_large_format']
         
+        logger.debug(f"Checking for large format pages in {self.path}")
         for w, h in self.pages_dims:
             if self._is_large_format_page(w, h):
+                logger.debug(f"Page with size {w}x{h} inches is large format")
                 self.property_cache['has_large_format'] = True
                 break
 
@@ -238,6 +246,7 @@ class PDFTextExtractor(FileTextExtractor):
             If the input PDF file does not exist.
         """
         input_pdf_path = Path(pdf_path)
+        logger.debug(f"Starting OCR extraction for {input_pdf_path} with params: {ocr_params}")
         if not input_pdf_path.exists():
             raise FileNotFoundError(f"Input PDF file not found for OCR operation: {input_pdf_path}")
         
@@ -250,6 +259,7 @@ class PDFTextExtractor(FileTextExtractor):
             params['input_file'] = pdf_path
             params['output_file'] = output_pdf_path
             ocrmypdf.ocr(**params)
+            logger.debug(f"OCR completed, reading text from generated PDF")
 
             with fitz.open(output_pdf_path) as doc:
                 return "".join(page.get_text() for page in doc)
@@ -270,6 +280,7 @@ class PDFTextExtractor(FileTextExtractor):
         str
             Extracted text, using OCR if necessary.
         """
+        logger.debug(f"Extracting text with fitz for document: {pdf_document.path}")
         ocr_needed = False
         pdf_text = ""
         for _, page in enumerate(fitz_doc):
@@ -279,11 +290,13 @@ class PDFTextExtractor(FileTextExtractor):
             if not page_text.strip():
                 ocr_needed = True
                 pdf_text = ""
+                logger.info(f"No text found on page {_}, triggering OCR fallback")
                 break
             pdf_text += page_text
         
         if not ocr_needed:
             return pdf_text
+        logger.info(f"OCR needed for document: {pdf_document.path}")
         
         ocr_params = self.ocr_params.copy()
         # if no timeout param in ocr_params, set a default based on page count
@@ -312,23 +325,29 @@ class PDFTextExtractor(FileTextExtractor):
         str
             Normalized extracted text.
         """
+        logger.info(f"Extracting text from PDF: {pdf_filepath}")
         doc = None
         extracted_text = ""
         try:
-            pdf = PDFFile(validate_file(pdf_filepath))
+            validated = validate_file(pdf_filepath)
+            logger.debug(f"Validated PDF path: {validated}")
+            pdf = PDFFile(validated)
 
             # PyMuPDF can open encrypted PDFs only with a password; streaming doesn't help.
             if pdf.is_encrypted:
+                logger.warning(f"PDF is encrypted, cannot extract text: {pdf.path}")
                 raise ValueError(f"PDF file is encrypted and cannot be processed: {pdf.path}")
             
             # if the file is small enough, read it into memory
             if pdf.size <= self.max_stream_size:
+                logger.debug(f"PDF size {pdf.size} <= max_stream_size, processing in-memory")
                 data = pdf.path.read_bytes()
                 doc = fitz.open(stream=data, filetype="pdf")
                 extracted_text = self._fitz_doc_text(fitz_doc=doc, pdf_document=pdf)
                 doc.close()
 
             else:
+                logger.debug(f"PDF size {pdf.size} > max_stream_size, processing via temp file")
                 with tempfile.TemporaryDirectory(prefix="text_extractor_") as temp_dir:
                     work_path = Path(temp_dir) / pdf.name
                     shutil.copy(pdf.path, work_path)
@@ -337,6 +356,7 @@ class PDFTextExtractor(FileTextExtractor):
                     doc.close()
         
         except Exception as e:
+            logger.error(f"Error extracting text from PDF {pdf_filepath}: {e}")
             raise e
 
         finally:

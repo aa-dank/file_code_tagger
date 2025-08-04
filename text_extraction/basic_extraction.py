@@ -81,17 +81,22 @@ class TextFileTextExtractor(FileTextExtractor):
         ValueError
             If the file cannot be read with any of the supported encodings.
         """
+        logger.info(f"Extracting text from file: {path}")
         # validate file path and type
         file_path = validate_file(path)
+        logger.debug(f"Validated file path: {file_path}")
         
         # Try different encodings
         for encoding in self.encodings:
+            logger.debug(f"Trying encoding: {encoding} for file: {file_path}")
             try:
                 with open(file_path, 'r', encoding=encoding) as file: #TODO:  errors='ignore'?
                     if file_path.suffix.lower() == ".xml":
+                        logger.debug(f"Stripping XML content from file: {file_path}")
                         return strip_html(file.read(), parser="xml")
                     
                     elif file_path.suffix.lower() == ".md":
+                        logger.debug(f"Converting Markdown to HTML for file: {file_path}")
                         text = markdown.markdown(file.read())
                         return strip_html(text, parser="html")
 
@@ -123,8 +128,11 @@ def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtracto
     ValueError
         If no extractor matches the file extension.
     """
+    logger.debug(f"Finding extractor for file: {file_path}")
     file_extension = Path(file_path).suffix.lower().lstrip(".")
     for extractor in extractors:
         if file_extension in extractor.file_extensions:
+            logger.debug(f"Selected extractor {extractor.__class__.__name__} for file: {file_path}")
             return extractor
+    logger.error(f"No extractor found for file extension: {file_extension}")
     raise ValueError(f"No extractor found for file extension: {file_extension}")

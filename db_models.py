@@ -155,6 +155,35 @@ class FilingTag(Base):
         order_by="TagPrototype.prototype_id",
     )
 
+    @property
+    def label_search_str(self) -> str:
+        """
+        Returns label with the space - dash - space suffix for use in quering FileLocation.file_server_directories.
+        """
+        return f"{self.label} - "
+    
+    @classmethod
+    def retrieve_tag_by_label(cls, session, label_str: str) -> 'FilingTag':
+        """
+        Retrieve a FilingTag by its base label, stripping any trailing text.
+
+        If the provided `label_str` contains spaces (e.g. when part of a directory
+        name like "F7.1 - Electrical"), only the segment before the first space is
+        used to query the `filing_tags` table.
+
+        Args:
+            session (sqlalchemy.orm.Session): Active database session.
+            label_str (str): The label to look up, possibly including suffixes
+                             (e.g. 'F7.1 - Mechanical Specs').
+
+        Returns:
+            FilingTag | None:
+                The matching FilingTag instance if found; otherwise None.
+        """
+        if ' ' in label_str:
+            label_str = label_str.split(' ')[0]  # use only the first part 
+        return session.query(cls).filter_by(label=label_str).first()
+
 
 class FileTagLabel(Base):
     """

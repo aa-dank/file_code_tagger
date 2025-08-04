@@ -72,6 +72,7 @@ class ImageTextExtractor(FileTextExtractor):
         texts = []
         for img in images:
             # detect and correct orientation
+            img = self._ensure_longside_bottom(img)
             img = self.detect_and_correct_orientation(img)
             logger.debug("Applied orientation correction")
             if self.preprocess:
@@ -99,7 +100,6 @@ class ImageTextExtractor(FileTextExtractor):
         # Resize if gigantic
         out = []
         for img in imgs:
-            logger.debug(f"Original image size: {img.size}")
             if max(img.size) > self.max_side:
                 scale = self.max_side / max(img.size)
                 new_sz = (int(img.width * scale), int(img.height * scale))
@@ -129,12 +129,27 @@ class ImageTextExtractor(FileTextExtractor):
             img = img.point(lambda x: 255 if x > 200 else 0)
             return img
 
+    def _ensure_longside_bottom(self, pil_img: Image.Image) -> Image.Image:
+        """
+        Rotate image to landscape if its short/long ratio deviates from
+        8.5×11 (≈0.773), so the long side ends up on the bottom.
+        """
+        w, h = pil_img.size
+        short_side, long_side = sorted((w, h))
+        ratio = short_side / long_side
+        letter_ratio = 8.5 / 11
+        # if it’s not roughly letter‐sized and is portrait, rotate to landscape
+        if abs(ratio - letter_ratio) > 0.05 and h > w:
+            logger.debug(f"Rotating image from portrait to landscape: {w}x{h}")
+            return pil_img.rotate(90, expand=True)
+        return pil_img
+
     def detect_and_correct_orientation(self, pil_img: Image.Image) -> Image.Image:
         """
         Use Tesseract OSD to detect rotation and counter-rotate image upright.
         """
         osd = pytesseract.image_to_osd(pil_img)
-        logger.debug(f"OSD output: {osd.strip()}")
+        logger.debug(f"Tesseract OSD output: {osd.strip()}")
         rot_match = re.search(r"Rotate: (\d+)", osd)
         if rot_match:
             angle = int(rot_match.group(1))

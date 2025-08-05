@@ -156,6 +156,13 @@ class FilingTag(Base):
     )
 
     @property
+    def full_tag_label_str(self) -> str:
+        """
+        Returns the full tag label with the space - dash - space suffix.
+        """
+        return f"{self.label} - {self.description}".strip()
+
+    @property
     def label_search_str(self) -> str:
         """
         Returns label with the space - dash - space suffix for use in quering FileLocation.file_server_directories.

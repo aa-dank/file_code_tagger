@@ -35,7 +35,8 @@ class ImageTextExtractor(FileTextExtractor):
                  psm: int = 3,
                  oem: int = 3,
                  preprocess: bool = True,
-                 max_side: int = 3000):
+                 max_side: int = 3000,
+                 default_image_dpi: int = 300):
         """
         Parameters
         ----------
@@ -51,6 +52,8 @@ class ImageTextExtractor(FileTextExtractor):
             Whether to apply grayscale/threshold/denoise pre-processing.
         max_side : int
             Resize largest image side to this (keeps memory reasonable).
+        default_image_dpi : int
+            DPI to use for images without embedded DPI info.
         """
         super().__init__()
         if tesseract_cmd:
@@ -60,6 +63,7 @@ class ImageTextExtractor(FileTextExtractor):
         self.oem = oem
         self.preprocess = preprocess
         self.max_side = max_side
+        self.default_image_dpi = default_image_dpi
 
     def __call__(self, path: str) -> str:
         logger.info(f"Extracting text from image: {path}")
@@ -73,13 +77,18 @@ class ImageTextExtractor(FileTextExtractor):
         for img in images:
             # detect and correct orientation
             img = self._ensure_longside_bottom(img)
+            img = self._inject_dpi(img, self.default_image_dpi)
             img = self.detect_and_correct_orientation(img)
-            logger.debug("Applied orientation correction")
             if self.preprocess:
                 img = self._preprocess(img)
                 logger.debug("Applied preprocessing to image")
+
             cfg = f"--psm {self.psm} --oem {self.oem}"
-            txt = pytesseract.image_to_string(img, lang=self.lang, config=config_str(cfg))
+            txt = pytesseract.image_to_string(
+                image=img,
+                lang=self.lang,
+                config=config_str(cfg)
+                )
             logger.debug(f"Extracted text length: {len(txt)} characters")
             texts.append(txt)
 
@@ -92,7 +101,7 @@ class ImageTextExtractor(FileTextExtractor):
         imgs = []
         with Image.open(path) as im:
             try:
-                for frame in ImageSequence(im):
+                for frame in ImageSequence.Iterator(im):
                     imgs.append(frame.convert("RGB"))
             except Exception:
                 # Not multi-frame
@@ -148,7 +157,12 @@ class ImageTextExtractor(FileTextExtractor):
         """
         Use Tesseract OSD to detect rotation and counter-rotate image upright.
         """
-        osd = pytesseract.image_to_osd(pil_img)
+        try:
+            osd = pytesseract.image_to_osd(pil_img)
+        except pytesseract.TesseractError as e:
+            logger.error(f"Tesseract OSD failed: {e}")
+            return pil_img
+
         logger.debug(f"Tesseract OSD output: {osd.strip()}")
         rot_match = re.search(r"Rotate: (\d+)", osd)
         if rot_match:
@@ -156,6 +170,16 @@ class ImageTextExtractor(FileTextExtractor):
             if angle != 0:
                 pil_img = pil_img.rotate(360 - angle, expand=True)
                 logger.info(f"Rotated image by {360-angle} degrees to correct orientation")
+        return pil_img
+    
+    def _inject_dpi(self, pil_img: Image.Image, dpi: int) -> Image.Image:
+        """
+        Inject DPI into the image metadata if not present.
+        """
+        dpi = pil_img.info.get("dpi", (0,0))[0]
+        if dpi == 0:
+            logger.debug(f"Injecting default DPI {self.default_image_dpi} into image")
+            pil_img.info["dpi"] = (self.default_image_dpi, self.default_image_dpi)
         return pil_img
 
 

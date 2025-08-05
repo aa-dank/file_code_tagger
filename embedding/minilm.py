@@ -21,9 +21,11 @@ class MiniLMEmbedder(EmbeddingModel):
         encoding_params: Additional parameters to pass to the encoding function
     """
     def __init__(self, encoding_params={}):
-        self.model: SentenceTransformer = SentenceTransformer('all-MiniLM-L6-v2')
+        self.model_name: str = 'all-MiniLM-L6-v2'
+        self.model: SentenceTransformer = SentenceTransformer(self.model_name)
         self.dim: int = self.model.get_sentence_embedding_dimension()
         self.encoding_params: dict = encoding_params
+        
 
     def encode(self, texts):
         """

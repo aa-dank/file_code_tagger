@@ -56,6 +56,7 @@ def stream_and_upsert(src_cur, dst_cur, table, upsert_sql):
     cols = [c.name for c in src_cur.description]
 
     # For file_locations, pre-fetch all valid file IDs from destination
+    # Valid file IDs are those that exist in the files table
     valid_file_ids = set()
     if table == "file_locations":
         dst_cur.execute("SELECT id FROM files")

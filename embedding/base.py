@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 class EmbeddingModel(ABC):
     dim: int
     model: str
+    model_name: str
 
     @abstractmethod
     def encode(self, texts: Sequence[str]) -> List[np.ndarray]:

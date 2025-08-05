@@ -86,3 +86,19 @@ def get_hash(filepath, hash_algo=hashlib.sha1):
             hashobj.update(chunk)
 
     return hashobj.hexdigest()
+
+def bytes_in_mb(bytes_size: int) -> float:
+    """
+    Convert bytes to megabytes.
+    
+    Parameters
+    ----------
+    bytes_size : int
+        Size in bytes.
+    
+    Returns
+    -------
+    float
+        Size in megabytes.
+    """
+    return bytes_size / (1024 * 1024) if bytes_size else 0.0

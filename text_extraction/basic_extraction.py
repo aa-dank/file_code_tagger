@@ -128,6 +128,18 @@ class TikaTextExtractor(FileTextExtractor):
         self.server_url = server_url or os.environ.get('TIKA_SERVER_URL', 'http://localhost:9998')
         self.tika_endpoint = f"{self.server_url}/tika"
         self.timeout = timeout
+        # verify that the Tika server is reachable
+        try:
+            resp = httpx.get(
+                self.tika_endpoint,
+                headers={'Accept': 'text/plain'},
+                timeout=self.timeout
+            )
+            resp.raise_for_status()
+            logger.info(f"Connected to Tika server at {self.server_url}")
+        except httpx.HTTPError as e:
+            logger.error(f"Unable to connect to Tika server at {self.server_url}: {e}")
+            raise RuntimeError(f"Cannot connect to Tika server at {self.server_url}") from e
 
     def __call__(self, path: str) -> str:
         """

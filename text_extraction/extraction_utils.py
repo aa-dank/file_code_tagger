@@ -49,7 +49,7 @@ def common_char_replacements(text: str) -> str:
         "\x00": "",  # remove NUL bytes
     }
     for src, dst in replacements_dict.items():
-        text = text.replace(src, dst)
+        text = text.replace(src, dst)   
     return text
 
 def strip_diacritics(text: str) -> str:

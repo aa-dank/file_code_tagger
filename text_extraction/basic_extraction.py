@@ -1,6 +1,8 @@
 # extracting/extractors.py
 
+import httpx
 import logging
+import os
 import markdown
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -106,6 +108,52 @@ class TextFileTextExtractor(FileTextExtractor):
         
         # If we get here, none of the encodings worked
         raise ValueError(f"Unable to read file with supported encodings: {path}")
+
+
+class TikaTextExtractor(FileTextExtractor):
+    """
+    Fallback extractor using a containerized Apache Tika (REST API).
+    """
+    # catch‐all for most formats; register this last in your extractor list
+    file_extensions = [
+        'pdf','doc','docx','ppt','pptx','xls','xlsx','rtf',
+        'html','htm','txt','csv','xml','json','md',
+        'png','jpg','jpeg','gif','tif','tiff','eml','msg',
+        'odt','ods'
+    ]
+
+    def __init__(self, server_url: str | None = None, timeout: int = 60):
+        super().__init__()
+        # e.g. "http://localhost:9998"
+        self.server_url = server_url or os.environ.get('TIKA_SERVER_URL', 'http://localhost:9998')
+        self.tika_endpoint = f"{self.server_url}/tika"
+        self.timeout = timeout
+
+    def __call__(self, path: str) -> str:
+        """
+        Send file bytes to Tika and return the plain‐text response.
+        """
+        logger.info(f"Extracting via Tika at {self.tika_endpoint}: {path}")
+        p = validate_file(path)
+        try:
+            with open(p, 'rb') as fh:
+                resp = httpx.put(
+                    self.tika_endpoint,
+                    data=fh,
+                    headers={'Accept': 'text/plain'},
+                    timeout=self.timeout
+                )
+            resp.raise_for_status()
+            text = resp.text or ""
+            return text
+
+        except httpx.HTTPError as e:
+            logger.error(f"Tika HTTP error on {path}: {e}")
+            raise
+
+        except Exception as e:
+            logger.error(f"Unexpected error during Tika extraction for {path}: {e}")
+            raise
     
 def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtractor:
     """

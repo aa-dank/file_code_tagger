@@ -268,23 +268,22 @@ class SpreadsheetTextExtractor(FileTextExtractor):
         # choose engine
         engine = self._pick_engine(ext)
 
-        # load sheet names
-        excel_file = pd.ExcelFile(p, engine=engine)
-        sheet_names = excel_file.sheet_names
-        if self.sheets == "first":
-            sheet_names = sheet_names[:1]
-        elif isinstance(self.sheets, list):
-            sheet_names = [s for s in sheet_names if s in self.sheets]
-
         parts = []
-        for s in sheet_names:
-            df = excel_file.parse(sheet_name=s, engine=engine)
+        with pd.ExcelFile(p, engine=engine) as excel_file:
+            sheet_names = excel_file.sheet_names
+            if self.sheets == "first":
+                sheet_names = sheet_names[:1]
+            elif isinstance(self.sheets, list):
+                sheet_names = [s for s in sheet_names if s in self.sheets]
 
-            if self.max_rows: df = df.head(self.max_rows)
-            if self.max_cols: df = df.iloc[:, :self.max_cols]
+            for s in sheet_names:
+                df = excel_file.parse(sheet_name=s, engine=engine)
 
-            txt = self._df_to_text(df, sheet=s)
-            parts.append(txt)
+                if self.max_rows: df = df.head(self.max_rows)
+                if self.max_cols: df = df.iloc[:, :self.max_cols]
+
+                txt = self._df_to_text(df, sheet=s)
+                parts.append(txt)
 
         return "\n\n".join(parts)
 

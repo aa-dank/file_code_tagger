@@ -11,7 +11,7 @@ from docx import Document
 from striprtf.striprtf import rtf_to_text
 
 from .basic_extraction import FileTextExtractor
-from .extraction_utils import validate_file, normalize_whitespace, run_pandoc, com_app
+from .extraction_utils import validate_file, run_pandoc, com_app
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class WordFileTextExtractor(FileTextExtractor):
             text = self._extract_legacy(str(p), ext)
         else:
             raise ValueError(f"Unsupported Word extension: {ext}")
-        return normalize_whitespace(text)
+        return text
 
     # ---------- helpers ----------
     def _extract_docx(self, path: str) -> str:
@@ -224,7 +224,7 @@ class SpreadsheetTextExtractor(FileTextExtractor):
         else:
             text = self._read_excel_like(p, ext)
         # normalize whitespace
-        return normalize_whitespace(text)
+        return text
 
     # ------------- helpers -------------
 
@@ -416,7 +416,7 @@ class PresentationTextExtractor(FileTextExtractor):
             else:
                 text = self._extract_pptx(str(converted))
         # normalize whitespace
-        return normalize_whitespace(text)
+        return text
 
     # ---------- pptx path ----------
     def _extract_pptx(self, path: str) -> str:

@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Union
 from .basic_extraction import FileTextExtractor
-from .extraction_utils import validate_file, normalize_whitespace
+from .extraction_utils import validate_file
 
 logger = logging.getLogger(__name__)
 
@@ -281,23 +281,17 @@ class PDFTextExtractor(FileTextExtractor):
             Extracted text, using OCR if necessary.
         """
         logger.debug(f"Extracting text with fitz for document: {pdf_document.path}")
-        ocr_needed = False
+        ocr_needed_length_threshold = 100 # if found text is less than this, trigger OCR
         pdf_text = ""
         for _, page in enumerate(fitz_doc):
             page_text = page.get_text()
-            
-            # if we are not finding text, we'll attempt ocr
-            if not page_text.strip():
-                ocr_needed = True
-                pdf_text = ""
-                logger.info(f"No text found on page {_}, triggering OCR fallback")
-                break
             pdf_text += page_text
         
-        if not ocr_needed:
+        if len(pdf_text) >= ocr_needed_length_threshold:
+            logger.debug(f"Extracted text length {len(pdf_text)}.")
             return pdf_text
-        logger.info(f"OCR needed for document: {pdf_document.path}")
         
+        logger.info(f"OCR needed for document: {pdf_document.path}")
         ocr_params = self.ocr_params.copy()
         # if no timeout param in ocr_params, set a default based on page count
         if not ocr_params.get('tesseract_timeout', None):
@@ -366,4 +360,4 @@ class PDFTextExtractor(FileTextExtractor):
                 except Exception as e:
                     pass
 
-        return normalize_whitespace(extracted_text)
+        return extracted_text

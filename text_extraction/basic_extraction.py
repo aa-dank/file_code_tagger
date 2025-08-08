@@ -195,4 +195,4 @@ def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtracto
             logger.debug(f"Selected extractor {extractor.__class__.__name__} for file: {file_path}")
             return extractor
     logger.error(f"No extractor found for file extension: {file_extension}")
-    raise ValueError(f"No extractor found for file extension: {file_extension}")
+    return None

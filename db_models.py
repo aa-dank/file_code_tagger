@@ -60,6 +60,12 @@ class File(Base):
                              back_populates="file",
                              uselist=False,
                              cascade="all, delete-orphan")
+    
+    # Relationship to collection_members
+    collection_members = relationship("FileCollectionMember",
+                                      back_populates="file",
+                                      cascade="all, delete-orphan",
+                                      foreign_keys="[FileCollectionMember.file_id]")
 
 
 class FileLocation(Base):
@@ -478,3 +484,56 @@ class PrototypeRunMetric(Base):
 
     # ─── Relationships ────────────────────────────────────────────────────────
     run = relationship("PrototypeRun", back_populates="metrics")
+
+
+class FileCollection(Base):
+    """
+    Named collections of files for experiments, training/test splits, prototypes, etc.
+    """
+    __tablename__ = 'file_collections'
+
+    id          = Column(Integer, primary_key=True)
+    name        = Column(Text, nullable=False, unique=True,
+                         comment="e.g. 'knn_train_v1', 'prototype_run_42_test'")
+    description = Column(Text, comment="Human-friendly notes about this collection")
+    created_at  = Column(DateTime(timezone=True), server_default=func.now(),
+                         nullable=False)
+
+    # Relationship to members
+    members = relationship(
+        "FileCollectionMember",
+        back_populates="collection",
+        cascade="all, delete-orphan"
+    )
+
+
+class FileCollectionMember(Base):
+    """
+    Join table linking files into a FileCollection with a role (train/test/val/prototype).
+    """
+    __tablename__ = 'file_collection_members'
+
+    collection_id = Column(
+        Integer,
+        ForeignKey('file_collections.id', ondelete='CASCADE'),
+        primary_key=True
+    )
+    file_id       = Column(
+        Integer,
+        ForeignKey('files.id', ondelete='CASCADE'),
+        primary_key=True
+    )
+    role          = Column(Text, nullable=False,
+                          comment="Role of this file in the collection: 'train', 'test', 'val', 'prototype', etc.")
+    added_at      = Column(DateTime(timezone=True), server_default=func.now(),
+                           nullable=False)
+
+    # Relationships
+    collection = relationship(
+        "FileCollection",
+        back_populates="members"
+    )
+    file = relationship(
+        "File",
+        back_populates="collection_members"  # see note below
+    )

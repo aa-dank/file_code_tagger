@@ -110,6 +110,20 @@ class TextFileTextExtractor(FileTextExtractor):
         raise ValueError(f"Unable to read file with supported encodings: {path}")
 
 
+class TikaUnsupportedError(Exception):
+    """Raised when Tika cannot process a file due to unsupported format or encryption."""
+    def __init__(self, filepath: str, message: str = "Unsupported by Tika"):
+        self.filepath = filepath
+        super().__init__(f"{message}: {filepath}")
+
+
+class TikaNoContentError(Exception):
+    """Raised when Tika returns 204 No Content (e.g., image‐only file without OCR)."""
+    def __init__(self, filepath: str, message: str = "No content found"):
+        self.filepath = filepath
+        super().__init__(f"{message}: {filepath}")
+
+
 class TikaTextExtractor(FileTextExtractor):
     """
     Fallback extractor using a containerized Apache Tika (REST API).
@@ -127,45 +141,56 @@ class TikaTextExtractor(FileTextExtractor):
         # e.g. "http://localhost:9998"
         self.server_url = server_url or os.environ.get('TIKA_SERVER_URL', 'http://localhost:9998')
         self.tika_endpoint = f"{self.server_url}/tika"
+        self.detect_endpoint = f"{self.server_url}/detect/stream"
         self.timeout = timeout
-        # verify that the Tika server is reachable
-        try:
-            resp = httpx.get(
+
+        # sanity check server is up
+        r = httpx.get(self.tika_endpoint, headers={'Accept': 'text/plain'}, timeout=self.timeout)
+        r.raise_for_status()
+
+    def _detect_mime(self, path: Path) -> str:
+        # filename hint improves detection
+        with open(path, 'rb') as fh:
+            r = httpx.put(
+                self.detect_endpoint,
+                content=fh,
+                headers={'Content-Disposition': f'attachment; filename=\"{path.name}\"'},
+                timeout=self.timeout
+            )
+        r.raise_for_status()
+        return (r.text or '').strip()
+
+    def __call__(self, path: str) -> str:
+        p = validate_file(path)
+        # Preflight: detect MIME
+        mime = self._detect_mime(p)
+        logger.debug(f"Tika detected MIME for {p}: {mime or 'UNKNOWN'}")
+
+        # Fast-fail on clearly unknown/opaque types
+        if not mime or mime == 'application/octet-stream':
+            raise TikaUnsupportedError(f"Tika can’t determine a usable MIME type for {p}")
+
+        # Extract text
+        with open(p, 'rb') as fh:
+            resp = httpx.put(
                 self.tika_endpoint,
+                content=fh,
                 headers={'Accept': 'text/plain'},
                 timeout=self.timeout
             )
-            resp.raise_for_status()
-            logger.info(f"Connected to Tika server at {self.server_url}")
-        except httpx.HTTPError as e:
-            logger.error(f"Unable to connect to Tika server at {self.server_url}: {e}")
-            raise RuntimeError(f"Cannot connect to Tika server at {self.server_url}") from e
 
-    def __call__(self, path: str) -> str:
-        """
-        Send file bytes to Tika and return the plain‐text response.
-        """
-        logger.info(f"Extracting via Tika at {self.tika_endpoint}: {path}")
-        p = validate_file(path)
-        try:
-            with open(p, 'rb') as fh:
-                resp = httpx.put(
-                    self.tika_endpoint,
-                    data=fh,
-                    headers={'Accept': 'text/plain'},
-                    timeout=self.timeout
-                )
-            resp.raise_for_status()
-            text = resp.text or ""
-            return text
+        # Explicit handling of common outcomes
+        if resp.status_code == 204:
+            raise TikaNoContentError(f"Tika returned 204 No Content for {p}")
+        if resp.status_code == 422:
+            raise TikaUnsupportedError(f"Tika returned 422 (unsupported/encrypted) for {p}: {resp.text}")
 
-        except httpx.HTTPError as e:
-            logger.error(f"Tika HTTP error on {path}: {e}")
-            raise
+        resp.raise_for_status()
 
-        except Exception as e:
-            logger.error(f"Unexpected error during Tika extraction for {path}: {e}")
-            raise
+        text = resp.text or ""
+        if not text.strip():
+            logger.warning(f"Tika returned 200 but empty body for {p} (MIME={mime})")
+        return text
     
 def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtractor:
     """

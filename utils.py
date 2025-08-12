@@ -4,7 +4,7 @@ from pathlib import Path, PurePosixPath
 
 logger = logging.getLogger(__name__)
 
-def extract_server_dir(full_path: str | Path,
+def extract_server_dirs(full_path: str | Path,
                        base_mount: str | Path) -> str:
     """
     Parameters

@@ -1,5 +1,9 @@
 # cli/add_files.py
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 import click
 import logging
 from pipeline.add_files_pipeline import process_files
@@ -25,8 +29,16 @@ def add_tag_files(
     python -m cli.add_files --tag "D4 - Mitigation Monitoring Program" --mount "N:\PPDO\Records" --number 250 --randomize --exclude-embedded --max-size-mb 150 --threshold 250 --tesseract-cmd "C:\Program Files\Tesseract-OCR\tesseract.exe"
     """
     # Setup logger
-    logger = setup_logger(name='add_files_cli', log_file=log_file, level=getattr(logging, log_level), console=True)
-    logger.info(f"Starting add_files for tag={tag}")
+    cli_logger = setup_logger(name='add_files_cli', log_file=log_file, level=getattr(logging, log_level), console=True)
+    # also wire up your pipeline logger
+    setup_logger(
+      name='add_files_pipeline',
+      log_file=log_file,
+      level=getattr(logging, log_level),
+      console=True
+    )
+    
+    cli_logger.info(f"Starting add_files for tag={tag}")
     # Run pipeline
     process_files(
         filing_code_tag=tag,
@@ -38,7 +50,7 @@ def add_tag_files(
         text_length_threshold=threshold,
         tesseract_cmd=tesseract_cmd
     )
-    logger.info("Completed add_files processing.")
+    cli_logger.info("Completed add_files processing.")
 
 if __name__ == '__main__':
     add_tag_files()

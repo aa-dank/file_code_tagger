@@ -219,12 +219,20 @@ class SpreadsheetTextExtractor(FileTextExtractor):
         logger.debug(f"Validated spreadsheet path: {p}")
         ext = p.suffix.lower().lstrip('.')
         logger.debug(f"Spreadsheet file extension detected: {ext}")
-        if ext in ("csv", "tsv"):
-            text = self._read_delimited(p, ext)
-        else:
-            text = self._read_excel_like(p, ext)
-        # normalize whitespace
-        return text
+        try:
+            if ext in ("csv", "tsv"):
+                text = self._read_delimited(p, ext)
+            else:
+                text = self._read_excel_like(p, ext)
+            return text
+        
+        except Exception as e:
+            # Catch zipfile errors for xlsx and other potential pandas read errors
+            if "zip file" in str(e).lower() and self.fallback_extractor:
+                logger.warning(f"Pandas failed to read {path} ({e}). Attempting fallback extractor.")
+                return self.fallback_extractor(path)
+            logger.error(f"Failed to extract text from spreadsheet {path}: {e}")
+            raise e
 
     # ------------- helpers -------------
 

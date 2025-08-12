@@ -3,14 +3,14 @@
 import logging
 import os
 import shutil
-import traceback
 import tempfile
+import traceback
 import pytesseract
 from pathlib import Path
 from typing import Optional
 from db_models import File, FileLocation, FilingTag, FileTagLabel, FileEmbedding, get_db_engine
 from embedding.minilm import MiniLMEmbedder
-from sqlalchemy import func, literal
+from sqlalchemy import func, literal, or_
 from sqlalchemy.orm import Session
 from text_extraction.pdf_extraction import PDFTextExtractor
 from text_extraction.basic_extraction import TextFileTextExtractor, TikaTextExtractor, get_extractor_for_file
@@ -104,7 +104,11 @@ def get_files_from_server_locations_query(
     Returns:
         Query: SQLAlchemy query object
     """
-    files_located_in_dir = FileLocation.file_server_directories.startswith(server_dirs)
+    server_dirs_str = str(server_dirs).rstrip('/')
+    files_located_in_dir = or_(
+        FileLocation.file_server_directories == server_dirs_str,
+        FileLocation.file_server_directories.startswith(server_dirs_str + '/')
+    )
     q = db_session.query(File)\
         .join(FileLocation)\
         .filter(files_located_in_dir)
@@ -172,16 +176,191 @@ def file_tags_from_path(pth: str|Path, session: Session) -> list[FilingTag]:
     Given a filesystem path, return all FilingTag rows whose
     full_tag_label_str appears anywhere in that path.
     """
-    path_str = str(pth)
-    return (
-        session
-        .query(FilingTag)
-        .filter(
-            literal(path_str)
-            .ilike(func.concat('%', FilingTag.full_tag_label_str, '%'))
-        )
-        .all()
-    )
+    path_str = str(pth).lower()
+    all_tags = session.query(FilingTag).all()
+    return [tag for tag in all_tags if tag.full_tag_label_str.lower() in path_str]
+
+# --- helper functions to DRY up file processing loops ---
+def _locate_for_tag(file_obj, server_mount, tag):
+    """
+    Locate the first FileLocation for a given File that matches a FilingTag.
+
+    Parameters
+    ----------
+    file_obj : File
+        ORM File instance containing .locations.
+    server_mount : str
+        Base mount path on the local machine.
+    tag : FilingTag
+        The FilingTag whose full_tag_label_str is used to filter locations.
+
+    Returns
+    -------
+    tuple
+        (local_path, filename, tag) where:
+          local_path : str
+            Full filesystem path to the file on the local machine, or None.
+          filename : str
+            The filename component, or None.
+          tag : FilingTag
+            The original tag passed in, or None if not found.
+    """
+    for loc in file_obj.locations:
+        if tag.full_tag_label_str.lower() not in loc.file_server_directories.lower():
+            continue
+        path = loc.local_filepath(server_mount)
+        if path and os.path.exists(path):
+            return path, loc.filename, tag
+    return None, None, None
+
+def _locate_for_location(session, file_obj, server_mount, target_dirs):
+    """
+    Locate the first FileLocation for a File under specified server directories 
+    and retrieve any FilingTags inferred from the path.
+
+    Parameters
+    ----------
+    session : Session
+        Active SQLAlchemy session for querying tags.
+    file_obj : File
+        ORM File instance containing .locations.
+    server_mount : str
+        Base mount path on the local machine.
+    target_dirs : str
+        POSIX-style path fragment to match FileLocation.file_server_directories.
+
+    Returns
+    -------
+    tuple
+        (local_path, filename, tags) where:
+          local_path : str
+            Full filesystem path to the file, or None.
+          filename : str
+            The filename component, or None.
+          tags : list[FilingTag]
+            List of tags whose full_tag_label_str appears in the path; empty if none.
+    """
+    for loc in file_obj.locations:
+        if not loc.file_server_directories.startswith(target_dirs):
+            continue
+        path = loc.local_filepath(server_mount)
+        if path and os.path.exists(path):
+            path_tags = file_tags_from_path(path, session)
+            return path, loc.filename, path_tags
+    return None, None, None
+
+def _label_for_tag(session, file_obj, tag):
+    """
+    Apply a single FilingTag (and its ancestors) to a File record.
+
+    Parameters
+    ----------
+    session : Session
+        Active SQLAlchemy session.
+    file_obj : File
+        ORM File instance to label.
+    tag : FilingTag
+        The FilingTag to apply.
+    """
+    label_file_using_tag(session, file_obj, tag)
+
+def _label_for_location(session, file_obj, tags):
+    """
+    Apply default and inferred FilingTags to a File based on its server path.
+
+    Parameters
+    ----------
+    session : Session
+        Active SQLAlchemy session.
+    file_obj : File
+        ORM File instance to label.
+    tags : list[FilingTag]
+        Inferred tags from the file path; each will be applied after the default tag.
+    """
+    for t in tags:
+        label_file_using_tag(session, file_obj, t)
+
+def _run_file_pipeline(
+    files,
+    server_mount,
+    session,
+    embedding_client,
+    tesseract_cmd,
+    text_length_threshold,
+    locator_fn,
+    labeling_fn
+):
+    """
+    Core loop to process, extract, embed, and label a list of File ORM objects.
+
+    Parameters
+    ----------
+    files : list[File]
+        List of ORM File instances to process.
+    server_mount : str
+        Base mount path for locating files.
+    session : Session
+        Active SQLAlchemy session for database operations.
+    embedding_client : MiniLMEmbedder
+        Client for generating vector embeddings.
+    tesseract_cmd : Optional[str]
+        Path to tesseract executable for OCR; passed to init_tesseract.
+    text_length_threshold : int
+        Minimum length of extracted text required to proceed with embedding.
+    locator_fn : callable
+        Function to locate the file on disk and return (path, filename, extra).
+    labeling_fn : callable
+        Function to apply labels to a File after successful embedding.
+
+    Notes
+    -----
+    - Copies files to a temporary directory before extraction.
+    - Uses a specialized extractor or Tika fallback for text extraction.
+    - Normalizes and cleans text before embedding.
+    - Commits each embedding and labeling operation immediately.
+    """
+    logger = logging.getLogger('add_files_pipeline')
+    init_tesseract(tesseract_cmd)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        for idx, file_obj in enumerate(files, start=1):
+            logger.info(f"Processing {idx}/{len(files)}: File ID {file_obj.id}")
+            if not file_obj.locations:
+                logger.warning(f"No locations for file {file_obj.id}")
+                continue
+            local_path, filename, extra = locator_fn(session, file_obj, server_mount)
+            if not local_path or not filename:
+                logger.warning(f"File {file_obj.id} not found on server.")
+                continue
+            try:
+                temp_fp = os.path.join(temp_dir, filename)
+                shutil.copyfile(local_path, temp_fp)
+                extractor = get_extractor_for_file(temp_fp, extractors_list)
+                text = extractor(temp_fp) if extractor else tika_extractor(temp_fp)
+                if text and len(text) >= text_length_threshold:
+                    text = common_char_replacements(text)
+                    text = strip_diacritics(text)
+                    text = normalize_unicode(text)
+                    text = normalize_whitespace(text)
+                    emb = embedding_client.encode([text])
+                    vec = emb[0] if emb else None
+                    if vec is not None:
+                        fe = FileEmbedding(
+                            file_hash=file_obj.hash,
+                            source_text=text,
+                            minilm_model=embedding_client.model_name,
+                            minilm_emb=vec
+                        )
+                        session.add(fe)
+                        session.commit()
+                        logger.info(f"Embedded file {file_obj.id}")
+                        labeling_fn(session, file_obj, extra)
+                    else:
+                        logger.warning(f"Embedding failed for {file_obj.id}")
+                else:
+                    logger.warning(f"Text too short or empty for {file_obj.id}")
+            except Exception as exc:
+                logger.error(f"Error {file_obj.id}: {exc}")
+                logger.debug(traceback.format_exc())
 
 def process_files_given_tag(
     filing_code_tag: str,
@@ -218,210 +397,75 @@ def process_files_given_tag(
         text_length_threshold (int): Minimum text length to embed
         tesseract_cmd (Optional[str]): Path to Tesseract executable
     """
-    # Initialize pipeline logger and OCR configuration
-    logger = logging.getLogger('add_files_pipeline')
-    init_tesseract(tesseract_cmd)
-
-    # Create embedding client and database session
-    embedding_client = MiniLMEmbedder()
     engine = get_db_engine()
     with Session(engine) as session:
-        # Retrieve the FilingTag or exit early
         tag = FilingTag.retrieve_tag_by_label(session, filing_code_tag)
         if not tag:
-            logger.error(f"Tag '{filing_code_tag}' not found in DB.")
+            logging.getLogger('add_files_pipeline').error(
+                f"Tag '{filing_code_tag}' not found in DB.")
             return
-
-        # Query matching files with filters
-        files_query = get_files_from_taggged_locations_query(
-            session, tag, n=n,
-            randomize=randomize,
-            exclude_embedded=exclude_embedded,
-            max_size_mb=max_size_mb
+        files = get_files_from_taggged_locations_query(
+            session, tag, n=n, randomize=randomize,
+            exclude_embedded=exclude_embedded, max_size_mb=max_size_mb
+        ).all()
+        _run_file_pipeline(
+            files,
+            file_server_location,
+            session,
+            MiniLMEmbedder(),
+            tesseract_cmd,
+            text_length_threshold,
+            locator_fn=lambda _s, f, m: _locate_for_tag(f, m, tag),
+            labeling_fn=_label_for_tag
         )
-
-        # Use a temporary workspace for file operations
-        with tempfile.TemporaryDirectory() as temp_dir:
-            files = files_query.all()
-            for file_count, file_obj in enumerate(files, start=1):
-                logger.info(f"Processing {file_count}/{len(files)}: File ID {file_obj.id}")
-                # Skip if no file location
-                if not file_obj.locations:
-                    logger.warning(f"No locations for file {file_obj.id}")
-                    continue
-
-                # Find the correct file location
-                local_path = None
-                filename = None
-                for loc in file_obj.locations:
-                    if tag.full_tag_label_str.lower() not in loc.file_server_directories.lower():
-                        continue
-                    path = loc.local_filepath(server_mount_path=file_server_location)
-                    if os.path.exists(path):
-                        local_path = path
-                        filename = loc.filename
-                        break
-                if not filename or not local_path:
-                    logger.warning(f"File {file_obj.id} not found on server.")
-                    continue
-                try:
-                    # Copy to temp workspace
-                    temp_fp = os.path.join(temp_dir, filename)
-                    shutil.copyfile(local_path, temp_fp)
-
-                    # Select specialized extractor or fallback
-                    extractor = get_extractor_for_file(temp_fp, extractors_list)
-                    if extractor:
-                        text = extractor(temp_fp)
-                    else:
-                        text = tika_extractor(temp_fp)
-
-                    # Proceed if text is sufficiently long
-                    if text and len(text) >= text_length_threshold:
-                        # Clean and normalize text
-                        text = common_char_replacements(text)
-                        text = strip_diacritics(text)
-                        text = normalize_unicode(text)
-                        text = normalize_whitespace(text)
-
-                        # Generate embedding
-                        emb = embedding_client.encode([text])
-                        vec = emb[0] if emb else None
-                        if vec is not None:
-                            # Persist embedding
-                            fe = FileEmbedding(
-                                file_hash=file_obj.hash,
-                                source_text=text,
-                                minilm_model=embedding_client.model_name,
-                                minilm_emb=vec
-                            )
-                            session.add(fe)
-                            session.commit()
-                            logger.info(f"Embedded file {file_obj.id}")
-
-                            # Label file after embedding
-                            label_file_using_tag(session, file_obj, tag)
-                        else:
-                            logger.warning(f"Embedding failed for {file_obj.id}")
-                            continue
-
-                    else:
-                        logger.warning(f"Text too short or empty for {file_obj.id}")
-                except Exception as exc:
-                    # Log and continue to next file
-                    logger.error(f"Error {file_obj.id}: {exc}")
-                    logger.debug(traceback.format_exc())
-                    continue
 
 def process_files_given_file_server_location(
     file_server_location: str,
+    mount: str,
     n: int = 250,
     exclude_embedded: bool = True,
     max_size_mb: Optional[float] = DEFAULT_MAX_SIZE_MB,
     text_length_threshold: int = DEFAULT_TEXT_LENGTH_THRESHOLD,
     tesseract_cmd: Optional[str] = None
 ):
-    
     """
-    Docstring goes here.
-    """
-    
-    # Initialize pipeline logger and OCR configuration
-    logger = logging.getLogger('add_files_pipeline')
-    init_tesseract(tesseract_cmd)
+    Main pipeline: extract, embed, and label files based on a server location.
 
-    # Create embedding client and database session
-    embedding_client = MiniLMEmbedder()
+    Steps:
+      1. Configure OCR (Tesseract) with optional custom command
+      2. Instantiate MiniLM embedder
+      3. Connect to DB and query files under the given server dirs
+      4. For each file:
+         a. Copy to a temporary workspace
+         b. Select a specialized extractor or fallback to Tika
+         c. Extract text, then clean and normalize it
+         d. Generate an embedding vector
+         e. Save the embedding and apply default + inferred tags
+      5. Continue processing even if individual files error
+
+    Parameters:
+        file_server_location (str): Base mount path for file storage.
+        n (int): Maximum number of files to process.
+        exclude_embedded (bool): If True, skip files with existing embeddings.
+        max_size_mb (Optional[float]): Maximum file size (in MB) to include.
+        text_length_threshold (int): Minimum character length for extracted text.
+        tesseract_cmd (Optional[str]): Path to tesseract executable for OCR.
+    """
     engine = get_db_engine()
     with Session(engine) as session:
-        # query for files in the given file server location
-        target_location_dirs = extract_server_dirs(file_server_location)
-        files_query = get_files_from_server_locations_query(
-            session, target_location_dirs,
-            n=n,
-            exclude_embedded=exclude_embedded,
-            max_size_mb=max_size_mb
+        target_dirs = extract_server_dirs(full_path=file_server_location,
+                                          base_mount=mount)
+        files = get_files_from_server_locations_query(
+            session, target_dirs, n=n,
+            exclude_embedded=exclude_embedded, max_size_mb=max_size_mb
+        ).all()
+        _run_file_pipeline(
+            files=files,
+            server_mount=mount,
+            session=session,
+            embedding_client=MiniLMEmbedder(),
+            tesseract_cmd=tesseract_cmd,
+            text_length_threshold=text_length_threshold,
+            locator_fn=lambda _s, f, m: _locate_for_location(_s, f, m, target_dirs),
+            labeling_fn=_label_for_location
         )
-
-        files = files_query.all()
-        with tempfile.TemporaryDirectory() as temp_dir:
-            for file_count, file_obj in enumerate(files, start=1):
-                logger.info(f"Processing {file_count}/{len(files)}: File ID {file_obj.id}")
-                # Skip if no file location
-                if not file_obj.locations:
-                    logger.warning(f"No locations for file {file_obj.id}")
-                    continue
-
-                # Find the correct file location
-                local_path = None
-                filename = None
-                for loc in file_obj.locations:
-                    if not loc.file_server_directories.startswith(tuple(target_location_dirs)):
-                        continue
-                    path = loc.local_filepath(server_mount_path=file_server_location)
-                    if os.path.exists(path):
-                        local_path = path
-                        filename = loc.filename
-                        break
-                
-                if not filename or not local_path:
-                    logger.warning(f"File {file_obj.id} not found on server.")
-                    continue
-
-                try:
-                    # determine if the path has tags before doing text extraction and embedding
-                    path_tags = file_tags_from_path(local_path, session)
-                    if not path_tags:
-                        logger.warning(f"No tags found for file {file_obj.id} at {local_path}")
-                        continue
-                    
-                    # Copy to temp workspace
-                    temp_fp = os.path.join(temp_dir, filename)
-                    shutil.copyfile(local_path, temp_fp)
-
-                    # Select specialized extractor or fallback
-                    extractor = get_extractor_for_file(temp_fp, extractors_list)
-                    if extractor:
-                        text = extractor(temp_fp)
-                    else:
-                        text = tika_extractor(temp_fp)
-
-                    # Proceed if text is sufficiently long
-                    if text and len(text) >= text_length_threshold:
-                        # Clean and normalize text
-                        text = common_char_replacements(text)
-                        text = strip_diacritics(text)
-                        text = normalize_unicode(text)
-                        text = normalize_whitespace(text)
-
-                        # Generate embedding
-                        emb = embedding_client.encode([text])
-                        vec = emb[0] if emb else None
-                        if vec is not None:
-                            # Persist embedding
-                            fe = FileEmbedding(
-                                file_hash=file_obj.hash,
-                                source_text=text,
-                                minilm_model=embedding_client.model_name,
-                                minilm_emb=vec
-                            )
-                            session.add(fe)
-                            session.commit()
-                            logger.info(f"Embedded file {file_obj.id}")
-
-                            # Label file after embedding
-                            label_file_using_tag(session, file_obj, FilingTag.retrieve_tag_by_label(session, 'default'))
-                        else:
-                            logger.warning(f"Embedding failed for {file_obj.id}")
-                            continue
-
-                        # Label file using tags
-                        for tag in path_tags:
-                            label_file_using_tag(session, file_obj, tag)
-
-                    else:
-                        logger.warning(f"Text too short or empty for {file_obj.id}")
-                except Exception as exc:
-                    # Log and continue to next file
-                    logger.error(f"Error {file_obj.id}: {exc}")
-                    logger.debug(traceback.format_exc())

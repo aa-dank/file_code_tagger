@@ -65,6 +65,7 @@ def add_tag_files(
     cli_logger.info("Completed add_files processing.")
 
 @cli.command('by-location')
+@click.option('--location', '-f', required=True, help='Local file server location to process')
 @click.option('--mount', '-m', required=True, help='File server mount path, e.g., N:\\PPDO\\Records')
 @click.option('--number', '-n', default=250, show_default=True, help='Number of files to process')
 @click.option('--exclude-embedded/--include-embedded', default=True, show_default=True)
@@ -74,7 +75,7 @@ def add_tag_files(
 @click.option('--log-file', default='app.log', show_default=True, help='Log file path')
 @click.option('--log-level', default='INFO', show_default=True, type=click.Choice(['DEBUG','INFO','WARNING','ERROR','CRITICAL'], case_sensitive=False))
 def add_location_files(
-    mount, number, exclude_embedded, max_size_mb, threshold, tesseract_cmd, log_file, log_level
+    location, mount, number, exclude_embedded, max_size_mb, threshold, tesseract_cmd, log_file, log_level
 ):
     """
     CLI tool to process and embed files for a given server location
@@ -98,9 +99,10 @@ def add_location_files(
         console=True
     )
 
-    cli_logger.info(f"Starting add_files for mount={mount}")
+    cli_logger.info(f"Starting add_files for location={location}")
     process_files_given_file_server_location(
-        file_server_location=mount,
+        file_server_location=location,
+        mount=mount,
         n=number,
         exclude_embedded=exclude_embedded,
         max_size_mb=max_size_mb,

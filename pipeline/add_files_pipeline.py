@@ -8,7 +8,7 @@ import traceback
 import pytesseract
 from pathlib import Path
 from typing import Optional
-from db_models import File, FileLocation, FilingTag, FileTagLabel, FileEmbedding, get_db_engine
+from db.models import File, FileLocation, FilingTag, FileTagLabel, FileEmbedding, get_db_engine
 from embedding.minilm import MiniLMEmbedder
 from sqlalchemy import func, literal, or_
 from sqlalchemy.orm import Session
@@ -323,13 +323,13 @@ def _run_file_pipeline(
     init_tesseract(tesseract_cmd)
     with tempfile.TemporaryDirectory() as temp_dir:
         for idx, file_obj in enumerate(files, start=1):
-            logger.info(f"Processing {idx}/{len(files)}: File ID {file_obj.id}")
+            logger.info(f"Processing {idx}/{len(files)}: File hash {file_obj.hash}")
             if not file_obj.locations:
-                logger.warning(f"No locations for file {file_obj.id}")
+                logger.warning(f"No locations for file hash {file_obj.hash}. Skipping.")
                 continue
             local_path, filename, extra = locator_fn(session, file_obj, server_mount)
             if not local_path or not filename:
-                logger.warning(f"File {file_obj.id} not found on server.")
+                logger.warning(f"File hash {file_obj.hash} not found on server.")
                 continue
             try:
                 temp_fp = os.path.join(temp_dir, filename)
@@ -352,14 +352,14 @@ def _run_file_pipeline(
                         )
                         session.add(fe)
                         session.commit()
-                        logger.info(f"Embedded file {file_obj.id}")
+                        logger.info(f"Embedded file {file_obj.hash} with {embedding_client.model_name}")
                         labeling_fn(session, file_obj, extra)
                     else:
-                        logger.warning(f"Embedding failed for {file_obj.id}")
+                        logger.warning(f"Embedding failed for {file_obj.hash}")
                 else:
-                    logger.warning(f"Text too short or empty for {file_obj.id}")
+                    logger.warning(f"Text too short or empty for {file_obj.hash}")
             except Exception as exc:
-                logger.error(f"Error {file_obj.id}: {exc}")
+                logger.error(f"Error {file_obj.hash}: {exc}")
                 logger.debug(traceback.format_exc())
 
 def process_files_given_tag(

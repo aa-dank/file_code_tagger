@@ -213,7 +213,8 @@ class PDFTextExtractor(FileTextExtractor):
             'jobs': max(os.cpu_count() - 1, 1),  # Use all but one CPU core for OCR
             'optimize':1,
             'invalidate_digital_signatures': True,
-            'output_type': 'pdf'
+            'output_type': 'pdf',
+            'tesseract_timeout': 300,  # default timeout for Tesseract OCR
         }
 
         # threshold of files which cannot be processed in memory, default is 100 MB

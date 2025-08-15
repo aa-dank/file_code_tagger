@@ -1,4 +1,4 @@
-# models.py
+# db/models.py
 
 import logging
 import os
@@ -9,19 +9,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from sqlalchemy import create_engine
+from db.db import get_db_engine  # Import get_db_engine from db/db.py
 
 logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 
-def get_db_engine():
-    """Create and return a SQLAlchemy engine for the project database."""
-    conn_string = (
-        f"postgresql+psycopg://{os.getenv('PROJECT_DB_USERNAME')}:{os.getenv('PROJECT_DB_PASSWORD')}"
-        f"@{os.getenv('PROJECT_DB_HOST')}:{os.getenv('PROJECT_DB_PORT')}/{os.getenv('PROJECT_DB_NAME')}"
-    )
-    return create_engine(conn_string)
+# get_db_engine moved to db/db.py
 
 class File(Base):
     __tablename__ = 'files'

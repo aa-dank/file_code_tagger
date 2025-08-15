@@ -142,7 +142,7 @@ class WordFileTextExtractor(FileTextExtractor):
         if self.pandoc_path:
             return self._pandoc_to_txt(path)
 
-        raise RuntimeError("No viable method to extract text from legacy Word file on Windows.")
+        raise RuntimeError(f"No viable method to extract text from legacy Word file on Windows:\n{path}")
 
     def _word_com_to_txt(self, path: str) -> str:
         """

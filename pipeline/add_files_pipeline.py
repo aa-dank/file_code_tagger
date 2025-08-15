@@ -8,7 +8,8 @@ import traceback
 import pytesseract
 from pathlib import Path
 from typing import Optional
-from db.models import File, FileLocation, FilingTag, FileTagLabel, FileEmbedding, get_db_engine
+from db.models import File, FileLocation, FilingTag, FileTagLabel, FileEmbedding
+from db import get_db_engine
 from embedding.minilm import MiniLMEmbedder
 from sqlalchemy import func, literal, or_
 from sqlalchemy.orm import Session

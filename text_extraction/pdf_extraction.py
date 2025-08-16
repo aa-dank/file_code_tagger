@@ -2,6 +2,14 @@
 
 import fitz
 import logging
+
+# Raise the maximum number of pixels for images to prevent errors with large PDFs
+try:
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = 300_000_000  # or None to disable
+except ImportError:
+    pass
+
 import ocrmypdf
 import os
 import shutil

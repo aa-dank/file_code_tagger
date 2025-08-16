@@ -170,6 +170,7 @@ class TikaTextExtractor(FileTextExtractor):
         if not mime or mime == 'application/octet-stream':
             raise TikaUnsupportedError(f"Tika can’t determine a usable MIME type for {p}")
 
+        logger.info(f"Extracting text from {p} with Tika (MIME={mime})")
         # Extract text
         with open(p, 'rb') as fh:
             resp = httpx.put(

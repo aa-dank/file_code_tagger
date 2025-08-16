@@ -28,6 +28,14 @@ class File(Base):
     embedding = relationship("FileEmbedding", back_populates="file", uselist=False, cascade="all, delete-orphan")
     collection_members = relationship("FileCollectionMember", back_populates="file", cascade="all, delete-orphan", foreign_keys="[FileCollectionMember.file_id]")
 
+    date_mentions = relationship(
+        "FileDateMention",
+        back_populates="file",
+        cascade="all, delete-orphan",
+        foreign_keys="[FileDateMention.file_hash]"
+    )
+
+
 class FileLocation(Base):
     __tablename__ = 'file_locations'
     id = Column(Integer, primary_key=True)
@@ -50,6 +58,7 @@ class FileLocation(Base):
     def file_size(self) -> int:
         file = self.file
         return file.size if file else 0
+
 
 class FilingTag(Base):
     __tablename__ = 'filing_tags'
@@ -83,6 +92,7 @@ class FilingTag(Base):
             label_str = label_str.split(' ')[0]
         return session.query(cls).filter_by(label=label_str).first()
 
+
 class FileTagLabel(Base):
     __tablename__ = 'file_tag_labels'
     file_id = Column(Integer, ForeignKey('files.id'), primary_key=True)
@@ -93,6 +103,7 @@ class FileTagLabel(Base):
     split = Column(Text, default='train')
     file = relationship("File", back_populates="tag_labels", foreign_keys=[file_hash])
     filing_tag = relationship("FilingTag", back_populates="file_labels")
+
 
 class FileEmbedding(Base):
     __tablename__ = 'file_embeddings'
@@ -108,6 +119,7 @@ class FileEmbedding(Base):
     mpnet_emb = Column(Vector(768))
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     file = relationship("File", back_populates="embedding", foreign_keys=[file_hash])
+
 
 class TagPrototype(Base):
     __tablename__ = "tag_prototypes"
@@ -129,6 +141,7 @@ class TagPrototype(Base):
     notes        = Column(Text, comment="Optional notes about the prototype.")
     filing_tag = relationship("FilingTag", back_populates="prototypes")
 
+
 class PrototypeRun(Base):
     __tablename__ = "prototype_runs"
     run_id        = Column(Integer, primary_key=True)
@@ -149,6 +162,7 @@ class PrototypeRun(Base):
         cascade="all, delete-orphan"
     )
 
+
 class PrototypeMember(Base):
     __tablename__ = "prototype_members"
     run_id = Column(Integer, ForeignKey("prototype_runs.run_id", ondelete="CASCADE"), primary_key=True)
@@ -167,6 +181,7 @@ class PrototypeMember(Base):
         ),
     )
 
+
 class PrototypeRunMetric(Base):
     __tablename__ = "prototype_run_metrics"
     run_id = Column(Integer, ForeignKey("prototype_runs.run_id", ondelete="CASCADE"), primary_key=True)
@@ -175,6 +190,7 @@ class PrototypeRunMetric(Base):
     value = Column(Numeric)
     computed_at = Column(DateTime(timezone=True), server_default=func.now())
     run = relationship("PrototypeRun", back_populates="metrics")
+
 
 class FileCollection(Base):
     __tablename__ = 'file_collections'
@@ -187,6 +203,7 @@ class FileCollection(Base):
         back_populates="collection",
         cascade="all, delete-orphan"
     )
+
 
 class FileCollectionMember(Base):
     __tablename__ = 'file_collection_members'
@@ -202,3 +219,22 @@ class FileCollectionMember(Base):
         "File",
         back_populates="collection_members"
     )
+
+
+class FileDateMention(Base):
+    __tablename__ = 'file_date_mentions'
+    __table_args__ = (
+        Index('ix_file_date_mentions_date', 'mention_date'),
+        Index('ix_file_date_mentions_file', 'file_hash'),
+        Index('ix_file_date_mentions_date_gran', 'mention_date', 'granularity'),
+    )
+
+    # Link to files via the unique file hash (consistent with FileEmbedding / FileTagLabel)
+    file_hash     = Column(String, ForeignKey('files.hash'), primary_key=True)
+    mention_date  = Column(Date, primary_key=True)           # normalized calendar date
+    granularity   = Column(Text, primary_key=True, default='day')  # 'day' | 'month' | 'year'
+    mentions_count= Column(Integer, nullable=False, default=1)     # per-file count for this date
+    extractor     = Column(Text, nullable=True)              # e.g., 'dateparser@1.2.3'
+    extracted_at  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    file = relationship("File", back_populates="date_mentions", foreign_keys=[file_hash])

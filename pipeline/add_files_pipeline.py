@@ -11,7 +11,7 @@ from typing import Optional
 from db.models import File, FileLocation, FilingTag, FileTagLabel, FileEmbedding
 from db import get_db_engine
 from embedding.minilm import MiniLMEmbedder
-from sqlalchemy import func, literal, or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from text_extraction.pdf_extraction import PDFTextExtractor
 from text_extraction.basic_extraction import TextFileTextExtractor, TikaTextExtractor, get_extractor_for_file
@@ -55,7 +55,7 @@ def init_tesseract(cmd: Optional[str] = None):
     if cmd:
         pytesseract.pytesseract.tesseract_cmd = cmd
 
-def get_files_from_taggged_locations_query(
+def get_files_from_tagged_locations_query(
     db_session: Session,
     tag_obj: FilingTag,
     n: int = 100,
@@ -322,16 +322,16 @@ def _run_file_pipeline(
     """
     logger = logging.getLogger('add_files_pipeline')
     init_tesseract(tesseract_cmd)
-    with tempfile.TemporaryDirectory() as temp_dir:
-        for idx, file_obj in enumerate(files, start=1):
-            logger.info(f"Processing {idx}/{len(files)}: File hash {file_obj.hash}")
-            if not file_obj.locations:
-                logger.warning(f"No locations for file hash {file_obj.hash}. Skipping.")
-                continue
-            local_path, filename, extra = locator_fn(session, file_obj, server_mount)
-            if not local_path or not filename:
-                logger.warning(f"File hash {file_obj.hash} not found on server.")
-                continue
+    for idx, file_obj in enumerate(files, start=1):
+        logger.info(f"Processing {idx}/{len(files)}: File hash {file_obj.hash}")
+        if not file_obj.locations:
+            logger.warning(f"No locations for file hash {file_obj.hash}. Skipping.")
+            continue
+        local_path, filename, extra = locator_fn(session, file_obj, server_mount)
+        if not local_path or not filename:
+            logger.warning(f"File hash {file_obj.hash} not found on server.")
+            continue
+        with tempfile.TemporaryDirectory() as temp_dir:
             try:
                 temp_fp = os.path.join(temp_dir, filename)
                 shutil.copyfile(local_path, temp_fp)
@@ -405,7 +405,7 @@ def process_files_given_tag(
             logging.getLogger('add_files_pipeline').error(
                 f"Tag '{filing_code_tag}' not found in DB.")
             return
-        files = get_files_from_taggged_locations_query(
+        files = get_files_from_tagged_locations_query(
             session, tag, n=n, randomize=randomize,
             exclude_embedded=exclude_embedded, max_size_mb=max_size_mb
         ).all()

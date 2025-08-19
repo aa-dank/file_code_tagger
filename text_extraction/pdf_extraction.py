@@ -328,18 +328,18 @@ class PDFTextExtractor(FileTextExtractor):
         str
             Normalized extracted text.
         """
-        logger.info(f"Extracting text from PDF: {pdf_filepath}")
+        
         doc = None
         extracted_text = ""
         try:
             validated = validate_file(pdf_filepath)
-            logger.debug(f"Validated PDF path: {validated}")
             pdf = PDFFile(validated)
+            logger.info(f"Extracting text from PDF: {pdf.name}")
 
             # PyMuPDF can open encrypted PDFs only with a password; streaming doesn't help.
             if pdf.is_encrypted:
-                logger.warning(f"PDF is encrypted, cannot extract text: {pdf.path}")
-                raise ValueError(f"PDF file is encrypted and cannot be processed: {pdf.path}")
+                logger.warning(f"PDF is encrypted, cannot extract text: {pdf.name}")
+                raise ValueError(f"PDF file is encrypted and cannot be processed: {pdf.name}")
             
             # if the file is small enough, read it into memory
             if pdf.size <= self.max_stream_size:
@@ -359,7 +359,7 @@ class PDFTextExtractor(FileTextExtractor):
                     doc.close()
         
         except Exception as e:
-            logger.error(f"Error extracting text from PDF {pdf_filepath}: {e}")
+            logger.error(f"Error extracting text from PDF {pdf.name}: {e}")
             raise e
 
         finally:

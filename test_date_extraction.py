@@ -3,6 +3,7 @@
 import logging
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from db import get_db_engine
 from db.models import FileDateMention, File, FileEmbedding
@@ -27,6 +28,7 @@ def test_date_extraction():
         file_with_text = session.query(File, FileEmbedding)\
             .join(FileEmbedding, File.hash == FileEmbedding.file_hash)\
             .filter(FileEmbedding.source_text.isnot(None))\
+            .order_by(func.random())\
             .first()
             
         if not file_with_text:

@@ -329,7 +329,7 @@ def _run_file_pipeline(
             continue
         local_path, filename, extra = locator_fn(session, file_obj, server_mount)
         if not local_path or not filename:
-            logger.warning(f"File hash {file_obj.hash} not found on server.")
+            logger.warning(f"File hash {file_obj.hash} not found on server using the locator function.")
             continue
         with tempfile.TemporaryDirectory() as temp_dir:
             try:

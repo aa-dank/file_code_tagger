@@ -5,6 +5,8 @@ import logging
 import os
 import markdown
 from abc import ABC, abstractmethod
+from datetime import datetime, date
+from dateparser.search import search_dates
 from pathlib import Path
 from .extraction_utils import validate_file, strip_html
 from typing import List
@@ -46,8 +48,8 @@ class FileTextExtractor(ABC):
             If the subclass does not implement this method.
         """
         raise NotImplementedError("Subclasses should implement this method.")
-    
 
+  
 class TextFileTextExtractor(FileTextExtractor):
     """
     Extract text from plain text files.
@@ -222,3 +224,22 @@ def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtracto
             return extractor
     logger.error(f"No extractor found for file extension: {file_extension}")
     return None
+
+def extract_text_dates(txt: str):
+    if not txt:
+        return []
+    settings = {
+        "PREFER_DATES_FROM": "past",        # construction docs are historical
+        "DATE_ORDER": "MDY",                # or "DMY" if that matches your corpus
+        "REQUIRE_PARTS": ["day","month","year"],  # avoid month-only hits
+        "SKIP_TOKENS": ["page","sheet","rev","scale","no.","#"],
+        "RETURN_AS_TIMEZONE_AWARE": False,
+    }
+    hits = search_dates(txt, languages=["en"], settings=settings) or []
+    # normalize to pure date and keep a sane window
+    out = []
+    for raw, dt in hits:
+        d = dt.date()
+        if date(1900,1,1) <= d <= date(2035,12,31):
+            out.append((raw, d))
+    return out

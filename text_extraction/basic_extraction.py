@@ -4,9 +4,9 @@ import httpx
 import logging
 import os
 import markdown
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, date
-from dateparser.search import search_dates
 from pathlib import Path
 from .extraction_utils import validate_file, strip_html
 from typing import List
@@ -225,21 +225,116 @@ def get_extractor_for_file(file_path: str, extractors: list) -> FileTextExtracto
     logger.error(f"No extractor found for file extension: {file_extension}")
     return None
 
-def extract_text_dates(txt: str):
-    if not txt:
-        return []
-    settings = {
-        "PREFER_DATES_FROM": "past",        # construction docs are historical
-        "DATE_ORDER": "MDY",                # or "DMY" if that matches your corpus
-        "REQUIRE_PARTS": ["day","month","year"],  # avoid month-only hits
-        "SKIP_TOKENS": ["page","sheet","rev","scale","no.","#"],
-        "RETURN_AS_TIMEZONE_AWARE": False,
-    }
-    hits = search_dates(txt, languages=["en"], settings=settings) or []
-    # normalize to pure date and keep a sane window
-    out = []
-    for raw, dt in hits:
-        d = dt.date()
-        if date(1900,1,1) <= d <= date(2035,12,31):
-            out.append((raw, d))
-    return out
+
+class DateExtractor:
+    """
+    Extract explicit, absolute dates from OCR'ed construction docs.
+    Supported formats (4-digit or 2-digit years):
+      - YYYY[-/.]MM[-/.]DD           e.g., 2024-06-05, 2019/12/31
+      - MM[-/.]DD[-/.]YYYY           e.g., 6/5/2024, 06-05-2024
+      - MM[-/.]DD[-/.]YY             e.g., 6/1/24, 01/05/00  (2-digit year w/ pivot)
+      - MonthName DD[, ]YYYY         e.g., Jan 5 2024, January 5, 2023
+      - (Optional) DD[-/.]MM[-/.]YYYY (DMY) if you truly have it
+
+    Year handling:
+      - Two-digit years normalized via a pivot (default 60): 00–59→2000–2059; 60–99→1960–1999.
+      - Final year window filter (default 1960–2035) reduces OCR noise further.
+    """
+
+    def __init__(self, year_min=1960, year_max=2035, enable_dmy=False, yy_pivot=60):
+        self.year_min = year_min
+        self.year_max = year_max
+        self.enable_dmy = enable_dmy
+        self.yy_pivot = yy_pivot  # e.g., 60 -> 60–99 => 1900s; 00–59 => 2000s
+
+        # YYYY[-/.]MM[-/.]DD  (ISO-ish)
+        self.rx_iso = re.compile(
+            r'\b((?:19|20)\d{2})[-/.](0[1-9]|1[0-2])[-/.](0[1-9]|[12]\d|3[01])\b'
+        )
+
+        # MM[-/.]DD[-/.]YYYY (US MDY, 4-digit year)
+        self.rx_mdy4 = re.compile(
+            r'\b(0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])[-/.]((?:19|20)\d{2})\b'
+        )
+
+        # NEW: MM[-/.]DD[-/.]YY (US MDY, 2-digit year)
+        # Examples (match): "6/1/24", "06-01-00", "12.31.69"
+        # Non-matches: "1/8" (no 2-digit year), "13/01/24" (invalid month; date() filter will reject anyway)
+        self.rx_mdy2 = re.compile(
+            r'\b(0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])[-/.](\d{2})\b'
+        )
+
+        # (Optional) DD[-/.]MM[-/.]YYYY (DMY)
+        self.rx_dmy4 = re.compile(
+            r'\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.]((?:19|20)\d{2})\b'
+        )
+
+        # MonthName DD[, ]YYYY
+        self.rx_mon = re.compile(
+            r'(?ix)\b'
+            r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+            r'jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|'
+            r'nov(?:ember)?|dec(?:ember)?)'
+            r'\s+([0-3]?\d)(?:,)?\s+((?:19|20)\d{2})\b'
+        )
+
+        self.month_to_number_map = {
+            m: i for i, m in enumerate(
+                ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'], start=1
+            )
+        }
+
+    def _normalize_yy(self, yy_str: str) -> int:
+        """
+        Normalize a 2-digit year to 4 digits using a pivot.
+        - If yy >= pivot -> 1900 + yy  (e.g., 69->1969 when pivot=60)
+        - Else             2000 + yy  (e.g., 00->2000, 24->2024)
+        """
+        yy = int(yy_str)
+        if yy >= self.yy_pivot:
+            return 1900 + yy
+        return 2000 + yy
+
+    @staticmethod
+    def _safe_date(y: int, m: int, d: int):
+        try:
+            return date(y, m, d)
+        except ValueError:
+            return None
+
+    def __call__(self, txt: str):
+        if not txt:
+            return []
+
+        candidates = []
+
+        # ISO YYYY-MM-DD
+        for y, m, d in self.rx_iso.findall(txt):
+            candidates.append((int(y), int(m), int(d)))
+
+        # MDY with 4-digit year
+        for m, d, y in self.rx_mdy4.findall(txt):
+            candidates.append((int(y), int(m), int(d)))
+
+        # MDY with 2-digit year (normalize via pivot)
+        for m, d, yy in self.rx_mdy2.findall(txt):
+            y_full = self._normalize_yy(yy)  # ensures 00 -> 2000, 69 -> 1969, etc.
+            candidates.append((int(y_full), int(m), int(d)))
+
+        # DMY (optional)
+        if self.enable_dmy:
+            for d, m, y in self.rx_dmy4.findall(txt):
+                candidates.append((int(y), int(m), int(d)))
+
+        # MonthName DD, YYYY
+        for mon, d, y in self.rx_mon.findall(txt):
+            candidates.append((int(y), self.month_to_number_map[mon[:3].lower()], int(d)))
+
+        # Validate + year window filter
+        out = []
+        for y, m, d in candidates:
+            dt = self._safe_date(y, m, d)
+            if dt and self.year_min <= dt.year <= self.year_max:
+                out.append(dt)
+
+        return out

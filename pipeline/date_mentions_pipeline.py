@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from db import get_db_engine
 from db.models import File, FileLocation, FileEmbedding, FileDateMention
-from text_extraction.basic_extraction import extract_text_dates
+from text_extraction.basic_extraction import DateExtractor
 from utils import extract_server_dirs
 
 # Match the logger name with what's configured in the CLI
@@ -66,7 +66,8 @@ def get_files_with_text_in_server_location(
 def extract_and_save_date_mentions(
     db_session: Session,
     file: File,
-    embedding: FileEmbedding
+    embedding: FileEmbedding,
+    date_extractor: DateExtractor
 ) -> int:
     """
     Extract dates from document text and save them to the file_date_mentions table.
@@ -89,19 +90,19 @@ def extract_and_save_date_mentions(
         logger.warning(f"No text to extract dates from for file {file.hash}")
         return 0
 
-    # Extract dates from text
-    date_hits = extract_text_dates(embedding.source_text)
+    # Extract dates from text using DateExtractor
+    date_hits = date_extractor(embedding.source_text)
     if not date_hits:
         logger.debug(f"No dates found in text for file {file.hash}")
         return 0
-    
+
     # Count occurrences of each date
     date_counts = {}
-    for raw_text, mentioned_date in date_hits:
+    for mentioned_date in date_hits:
         if mentioned_date not in date_counts:
             date_counts[mentioned_date] = 0
         date_counts[mentioned_date] += 1
-    
+
     # Save to database
     count = 0
     for mentioned_date, mentions_count in date_counts.items():
@@ -110,7 +111,7 @@ def extract_and_save_date_mentions(
             FileDateMention.file_hash == file.hash,
             FileDateMention.mention_date == mentioned_date
         ).first()
-        
+
         if existing:
             # Update count if it already exists
             existing.mentions_count = mentions_count
@@ -122,17 +123,17 @@ def extract_and_save_date_mentions(
                 mention_date=mentioned_date,
                 mentions_count=mentions_count,
                 granularity='day',  # Default - could be enhanced to detect partial dates
-                extractor='dateparser-basic'
+                extractor='regex-basic'
             )
             db_session.add(mention)
-        
+
         count += 1
-    
+
     # Commit the changes
     if count > 0:
         db_session.commit()
         logger.info(f"Saved {count} date mentions for file {file.hash}")
-    
+
     return count
 
 def process_date_mentions_for_server_location(
@@ -177,11 +178,14 @@ def process_date_mentions_for_server_location(
         )
         
         logger.info(f"Found {len(file_embeddings)} files with extracted text")
-        
+        dt_extractor = DateExtractor()
         # Process each file
         for file, embedding in file_embeddings:
             try:
-                date_count = extract_and_save_date_mentions(session, file, embedding)
+                date_count = extract_and_save_date_mentions(db_session=session,
+                                                            file=file,
+                                                            embedding=embedding,
+                                                            date_extractor=dt_extractor)
                 total_date_mentions += date_count
                 files_processed += 1
                 

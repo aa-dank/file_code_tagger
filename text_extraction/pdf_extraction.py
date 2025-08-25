@@ -219,8 +219,7 @@ class PDFTextExtractor(FileTextExtractor):
             'skip_text': True,
             'language': 'eng',
             'jobs': max(os.cpu_count() - 1, 1),  # Use all but one CPU core for OCR
-            'optimize':1,
-            'invalidate_digital_signatures': True,
+            'optimize': 0,
             'output_type': 'pdf',
             'tesseract_timeout': 300,  # default timeout for Tesseract OCR
         }

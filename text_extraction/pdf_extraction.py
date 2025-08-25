@@ -10,13 +10,14 @@ try:
 except ImportError:
     pass
 
+import io
 import ocrmypdf
 import os
 import shutil
 import tempfile
 
 from pathlib import Path
-from typing import Union
+from typing import Union, List, Tuple
 from .basic_extraction import FileTextExtractor
 from .extraction_utils import validate_file
 
@@ -328,12 +329,17 @@ class PDFTextExtractor(FileTextExtractor):
             Normalized extracted text.
         """
         
+        # Initialize document handle and result container
+        logger.debug(f"__call__: Starting extraction for file {pdf_filepath}")
         doc = None
         extracted_text = ""
         try:
             validated = validate_file(pdf_filepath)
+            # Log validated path
+            logger.debug(f"__call__: validated file path {validated}")
             pdf = PDFFile(validated)
-            logger.info(f"Extracting text from PDF: {pdf.name}")
+            # Log PDF metadata
+            logger.debug(f"__call__: PDF metadata size={pdf.size}, pages={pdf.page_count}, encrypted={pdf.is_encrypted}")
 
             # PyMuPDF can open encrypted PDFs only with a password; streaming doesn't help.
             if pdf.is_encrypted:
@@ -342,14 +348,14 @@ class PDFTextExtractor(FileTextExtractor):
             
             # if the file is small enough, read it into memory
             if pdf.size <= self.max_stream_size:
-                logger.debug(f"PDF size {pdf.size} <= max_stream_size, processing in-memory")
+                logger.debug(f"PDF size {pdf.size} <= max_stream_size ({self.max_stream_size}), processing in-memory")
                 data = pdf.path.read_bytes()
                 doc = fitz.open(stream=data, filetype="pdf")
                 extracted_text = self._fitz_doc_text(fitz_doc=doc, pdf_document=pdf)
                 doc.close()
 
             else:
-                logger.debug(f"PDF size {pdf.size} > max_stream_size, processing via temp file")
+                logger.debug(f"PDF size {pdf.size} > max_stream_size ({self.max_stream_size}), processing via temp file")
                 with tempfile.TemporaryDirectory(prefix="text_extractor_") as temp_dir:
                     work_path = Path(temp_dir) / pdf.name
                     shutil.copy(pdf.path, work_path)
@@ -368,4 +374,269 @@ class PDFTextExtractor(FileTextExtractor):
                 except Exception as e:
                     pass
 
+        # Final debug before returning
+        logger.debug(f"__call__: extraction complete, returning {len(extracted_text)} characters")
+        return extracted_text
+    
+
+class PDFTextExtractor2(FileTextExtractor):
+    """
+    Extract text from PDF files with fallback to OCR.
+
+    This class implements text extraction from PDF documents. It first attempts
+    to extract text directly from the PDF. For continuous sequences of pages without
+    text, it falls back to OCR processing using ocrmypdf.
+ 
+    Attributes
+    ----------
+    file_extensions : list
+        Supported file extensions for this extractor.
+    ocr_params : dict
+        Parameters for OCR processing using ocrmypdf.
+    max_stream_size : int
+        Maximum file size (bytes) to process in memory before using a temp file.
+    """
+    file_extensions = ['pdf']
+
+    def __init__(self):
+        """
+        Initialize PDFTextExtractor2 with default OCR parameters and stream-size threshold.
+
+        This sets up the OCR configuration and maximum in-memory file size.
+        """
+        # Log initialization start
+        logger.debug("__init__: Starting initialization of PDFTextExtractor2")
+        super().__init__()
+        self.ocr_params = {
+            'max_image_mpixels': 250,
+            'rotate_pages': True,
+            'deskew': True,
+            'invalidate_digital_signatures': True,
+            'skip_text': True,
+            'language': 'eng',
+            'jobs': max(os.cpu_count() - 1, 1),  # Use all but one CPU core for OCR
+            'optimize': 0,
+            'output_type': 'none',
+            'tesseract_timeout': 300,  # default timeout for Tesseract OCR
+        }
+
+        # threshold of files which cannot be processed in memory, default is 100 MB
+        self.max_stream_size = 100 * 1024 * 1024
+        # Log initialization details
+        logger.debug(f"Initialized PDFTextExtractor2 with max_stream_size={self.max_stream_size} and default OCR params keys={list(self.ocr_params.keys())}")
+            
+    def _identify_blank_ranges(self, page_texts: List[str]) -> List[range]:
+        """
+        Identify contiguous ranges of pages without native text.
+
+        Parameters
+        ----------
+        page_texts : List[str]
+            Extracted text for each page.
+
+        Returns
+        -------
+        List[range]
+            Ranges of page indices representing blank sequences.
+        """
+        # Log the number of pages to inspect
+        logger.debug(f"_identify_blank_ranges: processing {len(page_texts)} pages")
+        blank_ranges = []
+        current_range = None
+
+        for i, text in enumerate(page_texts):
+            if not text.strip():  # If the page is blank
+                if current_range is None:
+                    current_range = range(i, i + 1)
+                else:
+                    current_range = range(current_range.start, i + 1)
+            else:
+                if current_range is not None:
+                    blank_ranges.append(current_range)
+                    current_range = None
+
+        if current_range is not None:
+            blank_ranges.append(current_range)
+        # Log found blank page ranges
+        logger.debug(f"_identify_blank_ranges: found blank ranges {blank_ranges}")
+
+        return blank_ranges
+
+    def _get_pages_text_list(self, fitz_doc: fitz.Document, pdf_document: PDFFile) -> List[str]:
+        """
+        Extract native text from each page using PyMuPDF.
+
+        Parameters
+        ----------
+        fitz_doc : fitz.Document
+            Opened PDF document.
+        pdf_document : PDFFile
+            PDFFile instance for metadata.
+
+        Returns
+        -------
+        List[str]
+            Extracted text for each page.
+        """
+        # Log invocation
+        logger.debug(f"_get_pages_text_list: extracting {pdf_document.page_count} pages from {pdf_document.path}")
+        logger.info(f"Extracting text with fitz for document: {pdf_document.path}")
+        pdf_pages_text = []
+        for _, page in enumerate(fitz_doc):
+            page_text = page.get_text()
+            pdf_pages_text.append(page_text)
+
+        return pdf_pages_text
+    
+    def _ocr_extract_blank_pages(self, pdf: PDFFile, blank_ranges: List[range]):
+        """
+        Perform OCR on specified blank page ranges and collect extracted text.
+
+        Parameters
+        ----------
+        pdf : PDFFile
+            PDFFile instance for the document.
+        blank_ranges : List[range]
+            Ranges of page indices lacking native text.
+
+        Returns
+        -------
+        dict
+            Mapping of page ranges to OCR text.
+        """
+        # Log OCR start
+        logger.info(f"_ocr_extract_blank_pages: OCR for blank ranges {blank_ranges} in {pdf.path}")
+        page_ocr_dict = {}
+        full_pdf = Path(pdf.path)
+        ocr_call_params = self.ocr_params.copy()
+        
+        # set the max_image_mpixels if not in ocr_params
+        if not ocr_call_params.get('max_image_mpixels', None):
+            ocr_call_params['max_image_mpixels'] = 1000 if pdf.has_large_format else 300
+        with tempfile.TemporaryDirectory(prefix="ocr_batches_") as temp_dir:
+            for r in blank_ranges:
+                # Log each range being processed
+                logger.debug(f"_ocr_extract_blank_pages: processing range {r.start}-{r.stop}")
+                # if no timeout param in ocr_params, set a default based on range length
+                range_text = ""
+                if not ocr_call_params.get('tesseract_timeout', None):
+                    ocr_call_params['tesseract_timeout'] = min(300, len(r) * 45)
+
+                start, end = r.start, r.stop
+                subpdf_path = Path(temp_dir) / f"sub_{start}_{end}.pdf"
+                sidecar_buf = io.BytesIO() # This will hold the OCR output
+
+                with fitz.open(str(full_pdf)) as full_doc:
+                    subdoc = fitz.open()
+                    for i in range(start, end):
+                        subdoc.insert_pdf(full_doc, from_page=i, to_page=i)
+                    subdoc.save(subpdf_path)
+
+                ocr_call_params['input_file'] = subpdf_path
+                ocr_call_params['sidecar'] = sidecar_buf
+                ocrmypdf.ocr(**ocr_call_params)
+                with open(sidecar_buf, 'r', encoding='utf-8', errors='ignore') as f:
+                    range_text = f.read()
+                page_ocr_dict[range(start, end)] = range_text
+
+        # Log completion of OCR extraction
+        logger.debug(f"_ocr_extract_blank_pages: completed OCR for {len(page_ocr_dict)} ranges")
+        return page_ocr_dict
+    
+    def _compile_text(self, pages_text: List[str], ocr_texts: dict) -> str:
+        """
+        Compile native and OCR texts into a single combined string.
+
+        Parameters
+        ----------
+        pages_text : List[str]
+            Native extracted text per page.
+        ocr_texts : dict
+            Mapping of page indices/ranges to OCR text.
+
+        Returns
+        -------
+        str
+            Combined text for entire document.
+        """
+        # Log compiling details
+        logger.debug(f"_compile_text: compiling text from {len(pages_text)} pages with OCR entries {len(ocr_texts)}")
+        compiled_text = []
+        for i, text in enumerate(pages_text):
+            if text.strip():
+                compiled_text.append(text)
+            elif i in ocr_texts:
+                compiled_text.append(ocr_texts[i])
+        return "\n".join(compiled_text)
+
+    def __call__(self, pdf_filepath: str) -> str:
+        """
+        Extract and normalize text from the specified PDF file.
+
+        Parameters
+        ----------
+        pdf_filepath : str
+            Filesystem path to the PDF to process.
+
+        Returns
+        -------
+        str
+            Normalized extracted text.
+        """
+        
+        # Initialize document handle and result container
+        logger.debug(f"__call__: Starting extraction for file {pdf_filepath}")
+        doc = None
+        extracted_text = ""
+        try:
+            validated = validate_file(pdf_filepath)
+            # Log validated path
+            logger.debug(f"__call__: validated file path {validated}")
+            pdf = PDFFile(validated)
+            # Log PDF metadata
+            logger.debug(f"__call__: PDF metadata size={pdf.size}, pages={pdf.page_count}, encrypted={pdf.is_encrypted}")
+
+            # PyMuPDF can open encrypted PDFs only with a password; streaming doesn't help.
+            if pdf.is_encrypted:
+                logger.warning(f"PDF is encrypted, cannot extract text: {pdf.name}")
+                raise ValueError(f"PDF file is encrypted and cannot be processed: {pdf.name}")
+            
+            # if the file is small enough, read it into memory
+            if pdf.size <= self.max_stream_size:
+                logger.debug(f"PDF size {pdf.size} <= max_stream_size ({self.max_stream_size}), processing in-memory")
+                data = pdf.path.read_bytes()
+                doc = fitz.open(stream=data, filetype="pdf")
+                extracted_text = self._get_pages_text_list(fitz_doc=doc, pdf_document=pdf)
+                blank_ranges = self._identify_blank_ranges(extracted_text)
+                blank_ranges_text = self._ocr_extract_blank_pages(pdf=pdf, blank_ranges=blank_ranges)
+                extracted_text = self._compile_text(extracted_text, blank_ranges_text)
+                doc.close()
+
+            else:
+                logger.debug(f"PDF size {pdf.size} > max_stream_size ({self.max_stream_size}), processing via temp file")
+                with tempfile.TemporaryDirectory(prefix="text_extractor_") as temp_dir:
+                    work_path = Path(temp_dir) / pdf.name
+                    shutil.copy(pdf.path, work_path)
+                    doc = fitz.open(work_path)
+                    extracted_text = self._get_pages_text_list(fitz_doc=doc, pdf_document=pdf)
+                    blank_ranges = self._identify_blank_ranges(extracted_text)
+                    logger.debug(f"__call__: blank ranges identified {blank_ranges}")
+                    blank_ranges_text = self._ocr_extract_blank_pages(pdf=pdf, blank_ranges=blank_ranges)
+                    extracted_text = self._compile_text(extracted_text, blank_ranges_text)
+                    doc.close()
+        
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF {pdf.name}: {e}")
+            raise e
+
+        finally:
+            if doc is not None and not doc.is_closed:
+                try:
+                    doc.close()
+                except Exception as e:
+                    logger.error(f"Error closing document {pdf.name}: {e}")
+                    return extracted_text
+
+        # Final debug before returning
+        logger.debug(f"__call__: extraction complete, returning {len(extracted_text)} characters")
         return extracted_text

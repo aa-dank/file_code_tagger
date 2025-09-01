@@ -17,7 +17,7 @@ import shutil
 import tempfile
 
 from pathlib import Path
-from typing import Union, List, Tuple
+from typing import Union, List
 from .basic_extraction import FileTextExtractor
 from .extraction_utils import validate_file
 
@@ -311,7 +311,6 @@ class PDFTextExtractor(FileTextExtractor):
             ocr_params['max_image_mpixels'] = 1000 if pdf_document.has_large_format else 300
 
         pdf_text = self.extract_text_with_ocr(pdf_path=pdf_document.path, ocr_params=ocr_params)
-
         return pdf_text
 
     def __call__(self, pdf_filepath: str) -> str:
@@ -407,6 +406,7 @@ class PDFTextExtractor2(FileTextExtractor):
         # Log initialization start
         logger.debug("__init__: Starting initialization of PDFTextExtractor2")
         super().__init__()
+        # Use output_type 'pdf' so a temporary OCR'd PDF is produced; avoids stdout TTY issues.
         self.ocr_params = {
             'max_image_mpixels': 250,
             'rotate_pages': True,
@@ -416,8 +416,9 @@ class PDFTextExtractor2(FileTextExtractor):
             'language': 'eng',
             'jobs': max(os.cpu_count() - 1, 1),  # Use all but one CPU core for OCR
             'optimize': 0,
-            'output_type': 'none',
+            'output_type': 'pdf',
             'tesseract_timeout': 300,  # default timeout for Tesseract OCR
+            'progress_bar': False
         }
 
         # threshold of files which cannot be processed in memory, default is 100 MB
@@ -482,9 +483,13 @@ class PDFTextExtractor2(FileTextExtractor):
         logger.debug(f"_get_pages_text_list: extracting {pdf_document.page_count} pages from {pdf_document.path}")
         logger.info(f"Extracting text with fitz for document: {pdf_document.path}")
         pdf_pages_text = []
-        for _, page in enumerate(fitz_doc):
+        for idx, page in enumerate(fitz_doc):
             page_text = page.get_text()
             pdf_pages_text.append(page_text)
+            # Debug each page length and a short snippet
+            snippet = page_text[:80].replace('\n', ' ') if page_text else ''
+            logger.debug(f"_get_pages_text_list: page {idx} length={len(page_text)} snippet='{snippet[:80]}'")
+        logger.debug(f"_get_pages_text_list: total native text chars={sum(len(t) for t in pdf_pages_text)}")
 
         return pdf_pages_text
     
@@ -504,43 +509,60 @@ class PDFTextExtractor2(FileTextExtractor):
         dict
             Mapping of page ranges to OCR text.
         """
-        # Log OCR start
+        # Early exit if nothing to OCR
+        if not blank_ranges:
+            logger.debug("_ocr_extract_blank_pages: no blank ranges; skipping OCR")
+            return {}
+
         logger.info(f"_ocr_extract_blank_pages: OCR for blank ranges {blank_ranges} in {pdf.path}")
-        page_ocr_dict = {}
+        page_ocr_dict: dict[int, str] = {}
         full_pdf = Path(pdf.path)
-        ocr_call_params = self.ocr_params.copy()
-        
-        # set the max_image_mpixels if not in ocr_params
-        if not ocr_call_params.get('max_image_mpixels', None):
-            ocr_call_params['max_image_mpixels'] = 1000 if pdf.has_large_format else 300
+
+        total_blank_pages = sum(len(r) for r in blank_ranges)
+        failed_pages: list[int] = []
         with tempfile.TemporaryDirectory(prefix="ocr_batches_") as temp_dir:
             for r in blank_ranges:
-                # Log each range being processed
-                logger.debug(f"_ocr_extract_blank_pages: processing range {r.start}-{r.stop}")
-                # if no timeout param in ocr_params, set a default based on range length
-                range_text = ""
-                if not ocr_call_params.get('tesseract_timeout', None):
-                    ocr_call_params['tesseract_timeout'] = min(300, len(r) * 45)
-
                 start, end = r.start, r.stop
-                subpdf_path = Path(temp_dir) / f"sub_{start}_{end}.pdf"
-                sidecar_buf = io.BytesIO() # This will hold the OCR output
+                logger.debug(f"_ocr_extract_blank_pages: processing OCR for pages {start}-{end - 1}")
+                try:
+                    # Fresh params per range
+                    ocr_call_params = self.ocr_params.copy()
+                    if not ocr_call_params.get('max_image_mpixels', None):
+                        ocr_call_params['max_image_mpixels'] = 1000 if pdf.has_large_format else 300
+                    if not ocr_call_params.get('tesseract_timeout', None):
+                        ocr_call_params['tesseract_timeout'] = min(300, (end - start) * 45)
 
-                with fitz.open(str(full_pdf)) as full_doc:
-                    subdoc = fitz.open()
-                    for i in range(start, end):
-                        subdoc.insert_pdf(full_doc, from_page=i, to_page=i)
-                    subdoc.save(subpdf_path)
+                    subpdf_path = Path(temp_dir) / f"sub_{start}_{end}.pdf"
+                    # Build sub-PDF containing the blank page range
+                    with fitz.open(str(full_pdf)) as full_doc:
+                        subdoc = fitz.open()
+                        for i in range(start, end):
+                            subdoc.insert_pdf(full_doc, from_page=i, to_page=i)
+                        subdoc.save(subpdf_path)
 
-                ocr_call_params['input_file'] = subpdf_path
-                ocr_call_params['sidecar'] = sidecar_buf
-                ocrmypdf.ocr(**ocr_call_params)
-                with open(sidecar_buf, 'r', encoding='utf-8', errors='ignore') as f:
-                    range_text = f.read()
-                page_ocr_dict[range(start, end)] = range_text
+                    sidecar_io = io.BytesIO()
+                    # Run OCR capturing only sidecar text using stdout redirection workaround
+                    self._run_ocr_sidecar_only(subpdf_path, sidecar_io, ocr_call_params)
+                    sidecar_io.seek(0)
+                    try:
+                        ocr_text = sidecar_io.read().decode('utf-8', errors='ignore')
+                    except Exception as dec_e:
+                        logger.error(f"_ocr_extract_blank_pages: error decoding sidecar for pages {start}-{end - 1}: {dec_e}")
+                        ocr_text = ""
+                    if not ocr_text.strip():
+                        logger.warning(f"_ocr_extract_blank_pages: empty OCR sidecar text for pages {start}-{end - 1}")
+                    # Map each page index individually
+                    for p in range(start, end):
+                        page_ocr_dict[p] = ocr_text
+                except Exception as ocr_e:
+                    logger.error(f"_ocr_extract_blank_pages: OCR failed for pages {start}-{end - 1}: {ocr_e}")
+                    failed_pages.extend(list(range(start, end)))
+                    continue
 
-        # Log completion of OCR extraction
-        logger.debug(f"_ocr_extract_blank_pages: completed OCR for {len(page_ocr_dict)} ranges")
+        logger.info(f"_ocr_extract_blank_pages: OCR completed for {len(page_ocr_dict)} pages")
+        # Attach metadata about failures so caller can decide to raise
+        page_ocr_dict['_failed_pages'] = failed_pages  # type: ignore
+        page_ocr_dict['_total_blank_pages'] = total_blank_pages  # type: ignore
         return page_ocr_dict
     
     def _compile_text(self, pages_text: List[str], ocr_texts: dict) -> str:
@@ -565,9 +587,51 @@ class PDFTextExtractor2(FileTextExtractor):
         for i, text in enumerate(pages_text):
             if text.strip():
                 compiled_text.append(text)
-            elif i in ocr_texts:
-                compiled_text.append(ocr_texts[i])
+            else:
+                ocr_page_text = ocr_texts.get(i)
+                if ocr_page_text:
+                    compiled_text.append(ocr_page_text)
         return "\n".join(compiled_text)
+
+    def _run_ocr_sidecar_only(self, input_path: Path, sidecar_io: io.BytesIO, params: dict) -> None:
+        """Run ocrmypdf to populate only the sidecar text while suppressing stdout TTY issues.
+
+        This forces output_type='none' and output_file='-' so that ocrmypdf writes the
+        OCR PDF to stdout (discarded) and the extracted text to the provided sidecar
+        BytesIO. A low-level stdout redirection (fd=1) to a temporary file ensures
+        ocrmypdf does not error when stdout is not a real file.
+
+        Parameters
+        ----------
+        input_path : Path
+            Path to the input PDF file (or sub-PDF) to OCR.
+        sidecar_io : io.BytesIO
+            In-memory buffer to receive sidecar text output.
+        params : dict
+            Base OCR parameters to copy and augment.
+        """
+        copy_params = params.copy()
+        copy_params['input_file'] = input_path
+        # Create temp output PDF to satisfy ocrmypdf when producing an OCR layer
+        with tempfile.TemporaryDirectory(prefix="ocr_out_") as td_out:
+            output_pdf = Path(td_out) / "ocr_out.pdf"
+            copy_params['output_file'] = output_pdf
+            copy_params['sidecar'] = sidecar_io  # request sidecar text
+            copy_params['output_type'] = 'pdf'
+            try:
+                ocrmypdf.ocr(**copy_params)
+            except Exception as e:
+                logger.error(f"_run_ocr_sidecar_only: ocrmypdf failed for {input_path}: {e}")
+                raise
+            # If sidecar remained empty, fallback: extract text from produced PDF
+            if sidecar_io.getbuffer().nbytes == 0 and output_pdf.exists():
+                try:
+                    with fitz.open(output_pdf) as ocr_doc:
+                        extracted = "".join(p.get_text() for p in ocr_doc)
+                        sidecar_io.write(extracted.encode('utf-8', errors='ignore'))
+                        logger.debug(f"_run_ocr_sidecar_only: sidecar empty; used OCR PDF text length={len(extracted)}")
+                except Exception as fe:
+                    logger.warning(f"_run_ocr_sidecar_only: fallback read failed for {output_pdf}: {fe}")
 
     def __call__(self, pdf_filepath: str) -> str:
         """
@@ -609,6 +673,11 @@ class PDFTextExtractor2(FileTextExtractor):
                 extracted_text = self._get_pages_text_list(fitz_doc=doc, pdf_document=pdf)
                 blank_ranges = self._identify_blank_ranges(extracted_text)
                 blank_ranges_text = self._ocr_extract_blank_pages(pdf=pdf, blank_ranges=blank_ranges)
+                if blank_ranges:
+                    failed = blank_ranges_text.pop('_failed_pages', [])  # type: ignore
+                    total_blank = blank_ranges_text.pop('_total_blank_pages', 0)  # type: ignore
+                    if failed:
+                        logger.warning(f"__call__: OCR failures for pages {failed} (blank set size={total_blank}); proceeding with native text where available.")
                 extracted_text = self._compile_text(extracted_text, blank_ranges_text)
                 doc.close()
 
@@ -622,6 +691,11 @@ class PDFTextExtractor2(FileTextExtractor):
                     blank_ranges = self._identify_blank_ranges(extracted_text)
                     logger.debug(f"__call__: blank ranges identified {blank_ranges}")
                     blank_ranges_text = self._ocr_extract_blank_pages(pdf=pdf, blank_ranges=blank_ranges)
+                    if blank_ranges:
+                        failed = blank_ranges_text.pop('_failed_pages', [])  # type: ignore
+                        total_blank = blank_ranges_text.pop('_total_blank_pages', 0)  # type: ignore
+                        if failed:
+                            logger.warning(f"__call__: OCR failures for pages {failed} (blank set size={total_blank}); proceeding with native text where available.")
                     extracted_text = self._compile_text(extracted_text, blank_ranges_text)
                     doc.close()
         

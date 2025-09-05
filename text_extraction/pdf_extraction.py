@@ -551,9 +551,46 @@ class PDFTextExtractor2(FileTextExtractor):
                         ocr_text = ""
                     if not ocr_text.strip():
                         logger.warning(f"_ocr_extract_blank_pages: empty OCR sidecar text for pages {start}-{end - 1}")
-                    # Map each page index individually
-                    for p in range(start, end):
-                        page_ocr_dict[p] = ocr_text
+                    # Attempt to split multi-page OCR output into per-page segments
+                    num_pages = end - start
+                    import re as _re  # local import to respect 'only modify class' constraint
+                    trimmed = ocr_text.rstrip('\f\x0c')
+                    # Split on form feed characters which ocrmypdf uses between pages in sidecar output
+                    raw_splits = [_s for _s in _re.split(r'[\f\x0c]+', trimmed) if _s is not None]
+                    # Remove completely empty trailing segments
+                    page_segments = [seg for seg in raw_splits if seg.strip()]
+                    if len(page_segments) == num_pages:
+                        for offset, seg in enumerate(page_segments):
+                            page_index = start + offset
+                            page_ocr_dict[page_index] = seg
+                            logger.debug(f"_ocr_extract_blank_pages: assigned split OCR text to page {page_index} len={len(seg)}")
+                    else:
+                        logger.warning(
+                            f"_ocr_extract_blank_pages: split page count mismatch (expected {num_pages}, got {len(page_segments)}) for pages {start}-{end - 1}; falling back to per-page OCR"
+                        )
+                        # Fallback: perform OCR one page at a time to avoid duplication
+                        for single_page in range(start, end):
+                            try:
+                                single_subpdf = Path(temp_dir) / f"sub_{single_page}_{single_page+1}.pdf"
+                                with fitz.open(str(full_pdf)) as full_doc:
+                                    _single = fitz.open()
+                                    _single.insert_pdf(full_doc, from_page=single_page, to_page=single_page)
+                                    _single.save(single_subpdf)
+                                per_page_sidecar = io.BytesIO()
+                                self._run_ocr_sidecar_only(single_subpdf, per_page_sidecar, ocr_call_params)
+                                per_page_sidecar.seek(0)
+                                try:
+                                    per_text = per_page_sidecar.read().decode('utf-8', errors='ignore')
+                                except Exception as _dec2:
+                                    logger.error(f"_ocr_extract_blank_pages: decode error page {single_page}: {_dec2}")
+                                    per_text = ""
+                                if not per_text.strip():
+                                    logger.warning(f"_ocr_extract_blank_pages: empty OCR text after per-page fallback for page {single_page}")
+                                page_ocr_dict[single_page] = per_text
+                                logger.debug(f"_ocr_extract_blank_pages: per-page OCR assigned to page {single_page} len={len(per_text)}")
+                            except Exception as _single_e:
+                                logger.error(f"_ocr_extract_blank_pages: per-page OCR failed for page {single_page}: {_single_e}")
+                                failed_pages.append(single_page)
                 except Exception as ocr_e:
                     logger.error(f"_ocr_extract_blank_pages: OCR failed for pages {start}-{end - 1}: {ocr_e}")
                     failed_pages.extend(list(range(start, end)))

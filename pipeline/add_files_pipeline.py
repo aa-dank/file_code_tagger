@@ -8,7 +8,7 @@ import traceback
 import pytesseract
 from pathlib import Path
 from typing import Optional
-from db.models import File, FileLocation, FilingTag, FileTagLabel, FileEmbedding
+from db.models import File, FileLocation, FilingTag, FileTagLabel, FileContent
 from db import get_db_engine
 from embedding.minilm import MiniLMEmbedder
 from sqlalchemy import func, or_
@@ -78,8 +78,8 @@ def get_files_from_tagged_locations_query(
         .join(FileLocation)\
         .filter(tag_locations)
     if exclude_embedded:
-        q = q.outerjoin(FileEmbedding, File.hash == FileEmbedding.file_hash)\
-             .filter(FileEmbedding.file_hash == None)
+        q = q.outerjoin(FileContent, File.hash == FileContent.file_hash)\
+             .filter(FileContent.file_hash == None)
     if max_size_mb is not None:
         max_bytes = max_size_mb * 1024 * 1024
         q = q.filter(File.size <= max_bytes)
@@ -114,8 +114,8 @@ def get_files_from_server_locations_query(
         .join(FileLocation)\
         .filter(files_located_in_dir)
     if exclude_embedded:
-        q = q.outerjoin(FileEmbedding, File.hash == FileEmbedding.file_hash)\
-             .filter(FileEmbedding.file_hash == None)
+        q = q.outerjoin(FileContent, File.hash == FileContent.file_hash)\
+             .filter(FileContent.file_hash == None)
     if max_size_mb is not None:
         max_bytes = max_size_mb * 1024 * 1024
         q = q.filter(File.size <= max_bytes)
@@ -345,13 +345,13 @@ def _run_file_pipeline(
                     emb = embedding_client.encode([text])
                     vec = emb[0] if emb else None
                     if vec is not None:
-                        fe = FileEmbedding(
+                        fc = FileContent(
                             file_hash=file_obj.hash,
                             source_text=text,
                             minilm_model=embedding_client.model_name,
                             minilm_emb=vec
                         )
-                        session.add(fe)
+                        session.add(fc)
                         session.commit()
                         logger.info(f"Embedded file {file_obj.hash} with {embedding_client.model_name}")
                         labeling_fn(session, file_obj, extra)

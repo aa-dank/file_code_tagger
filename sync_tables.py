@@ -81,20 +81,20 @@ def stream_and_upsert(src_cur, dst_cur, table, upsert_sql):
 
         # after each batch of *files* refresh hash in child tables
         if table == "files":
-            dst_cur.execute(
-                """
-                UPDATE file_embeddings fe
-                  SET file_hash = f.hash
-                  FROM files f
-                 WHERE fe.file_hash = f.hash
-                   AND fe.file_hash IS NULL;
-                UPDATE file_tag_labels tl
-                  SET file_hash = f.hash
-                  FROM files f
-                 WHERE tl.file_id = f.id
-                   AND tl.file_hash IS NULL;
-                """
-            )
+                dst_cur.execute(
+                        """
+                        UPDATE file_contents fc
+                            SET file_hash = f.hash
+                            FROM files f
+                            WHERE fc.file_hash = f.hash
+                                AND fc.file_hash IS NULL;
+                        UPDATE file_tag_labels tl
+                            SET file_hash = f.hash
+                            FROM files f
+                            WHERE tl.file_id = f.id
+                                AND tl.file_hash IS NULL;
+                        """
+                )
 
     bar.close()
 

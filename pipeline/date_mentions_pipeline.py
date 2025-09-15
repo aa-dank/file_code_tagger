@@ -10,7 +10,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from db import get_db_engine
-from db.models import File, FileLocation, FileEmbedding, FileDateMention
+from db.models import File, FileLocation, FileContent, FileDateMention
 from text_extraction.basic_extraction import DateExtractor
 from utils import extract_server_dirs
 
@@ -22,9 +22,9 @@ def get_files_with_text_in_server_location(
     server_dirs: str | Path,
     n: Optional[int] = None,
     randomize: bool = False,
-) -> List[Tuple[File, FileEmbedding]]:
+    ) -> List[Tuple[File, FileContent]]:
     """
-    Get files with extracted text in the specified server location.
+    Get files with extracted text in the specified server location (from FileContent table).
 
     Parameters
     ----------
@@ -39,8 +39,8 @@ def get_files_with_text_in_server_location(
 
     Returns
     -------
-    List[Tuple[File, FileEmbedding]]
-        List of (File, FileEmbedding) tuples for files with text in the specified location
+    List[Tuple[File, FileContent]]
+        List of (File, FileContent) tuples for files with text in the specified location
     """
     server_dirs_str = str(server_dirs).rstrip('/')
     files_located_in_dir = or_(
@@ -48,13 +48,13 @@ def get_files_with_text_in_server_location(
         FileLocation.file_server_directories.startswith(server_dirs_str + '/')
     )
     
-    # Query files in the location that have text in FileEmbedding
-    q = db_session.query(File, FileEmbedding)\
+    # Query files in the location that have text in FileContent
+    q = db_session.query(File, FileContent)\
         .join(FileLocation, File.id == FileLocation.file_id)\
-        .join(FileEmbedding, File.hash == FileEmbedding.file_hash)\
+        .join(FileContent, File.hash == FileContent.file_hash)\
         .filter(files_located_in_dir)\
-        .filter(FileEmbedding.source_text.isnot(None))\
-        .filter(func.length(FileEmbedding.source_text) > 0)
+        .filter(FileContent.source_text.isnot(None))\
+        .filter(func.length(FileContent.source_text) > 0)
     
     if randomize:
         q = q.order_by(func.random())
@@ -66,11 +66,11 @@ def get_files_with_text_in_server_location(
 def extract_and_save_date_mentions(
     db_session: Session,
     file: File,
-    embedding: FileEmbedding,
+    content: FileContent,
     date_extractor: DateExtractor
 ) -> int:
     """
-    Extract dates from document text and save them to the file_date_mentions table.
+    Extract dates from document text (from FileContent) and save them to the file_date_mentions table.
 
     Parameters
     ----------
@@ -78,20 +78,20 @@ def extract_and_save_date_mentions(
         Active SQLAlchemy session
     file : File
         File ORM object
-    embedding : FileEmbedding
-        FileEmbedding ORM object with source_text
+    content : FileContent
+        FileContent ORM object with source_text
     
     Returns
     -------
     int
         Number of date mentions extracted and saved
     """
-    if not embedding.source_text:
+    if not content.source_text:
         logger.warning(f"No text to extract dates from for file {file.hash}")
         return 0
 
     # Extract dates from text using DateExtractor
-    date_hits = date_extractor(embedding.source_text)
+    date_hits = date_extractor(content.source_text)
     if not date_hits:
         logger.debug(f"No dates found in text for file {file.hash}")
         return 0
@@ -173,24 +173,24 @@ def process_date_mentions_for_server_location(
         logger.info(f"Target directories: {target_dirs}")
         
         # Get files with text in the target location
-        file_embeddings = get_files_with_text_in_server_location(
+        file_contents = get_files_with_text_in_server_location(
             session, target_dirs, n=limit, randomize=randomize
         )
         
-        logger.info(f"Found {len(file_embeddings)} files with extracted text")
+        logger.info(f"Found {len(file_contents)} files with extracted text")
         dt_extractor = DateExtractor()
         # Process each file
-        for file, embedding in file_embeddings:
+        for file, content in file_contents:
             try:
                 date_count = extract_and_save_date_mentions(db_session=session,
                                                             file=file,
-                                                            embedding=embedding,
+                                                            content=content,
                                                             date_extractor=dt_extractor)
                 total_date_mentions += date_count
                 files_processed += 1
                 
                 if files_processed % 100 == 0:
-                    logger.info(f"Processed {files_processed}/{len(file_embeddings)} files")
+                    logger.info(f"Processed {files_processed}/{len(file_contents)} files")
                     
             except Exception as e:
                 logger.error(f"Error processing file {file.hash}: {str(e)}")

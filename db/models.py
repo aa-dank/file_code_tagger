@@ -25,7 +25,7 @@ class File(Base):
     extension = Column(String)
     locations = relationship("FileLocation", back_populates="file", cascade="all, delete-orphan")
     tag_labels = relationship("FileTagLabel", back_populates="file", cascade="all, delete-orphan", foreign_keys="[FileTagLabel.file_hash]")
-    embedding = relationship("FileEmbedding", back_populates="file", uselist=False, cascade="all, delete-orphan")
+    content = relationship("FileContent", back_populates="file", uselist=False, cascade="all, delete-orphan")
     collection_members = relationship("FileCollectionMember", back_populates="file", cascade="all, delete-orphan", foreign_keys="[FileCollectionMember.file_id]")
 
     date_mentions = relationship(
@@ -105,11 +105,15 @@ class FileTagLabel(Base):
     filing_tag = relationship("FilingTag", back_populates="file_labels")
 
 
-class FileEmbedding(Base):
-    __tablename__ = 'file_embeddings'
+class FileContent(Base):
+    """
+    Stores extracted file text and vector embeddings for semantic search and ML tasks.
+    Previously named FileEmbedding (renamed for clarity).
+    """
+    __tablename__ = 'file_contents'
     __table_args__ = (
-        Index('ix_file_embeddings_minilm_emb', 'minilm_emb', postgresql_using='ivfflat', postgresql_ops={'minilm_emb': 'vector_cosine_ops'}, postgresql_with={'lists': 100}),
-        Index('ix_file_embeddings_mpnet_emb', 'mpnet_emb', postgresql_using='ivfflat', postgresql_ops={'mpnet_emb': 'vector_cosine_ops'}, postgresql_with={'lists': 100}),
+        Index('ix_file_contents_minilm_emb', 'minilm_emb', postgresql_using='ivfflat', postgresql_ops={'minilm_emb': 'vector_cosine_ops'}, postgresql_with={'lists': 100}),
+        Index('ix_file_contents_mpnet_emb', 'mpnet_emb', postgresql_using='ivfflat', postgresql_ops={'mpnet_emb': 'vector_cosine_ops'}, postgresql_with={'lists': 100}),
     )
     file_hash = Column(String, ForeignKey('files.hash'), primary_key=True)
     source_text = Column(Text)
@@ -118,7 +122,7 @@ class FileEmbedding(Base):
     mpnet_model = Column(Text)
     mpnet_emb = Column(Vector(768))
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    file = relationship("File", back_populates="embedding", foreign_keys=[file_hash])
+    file = relationship("File", back_populates="content", foreign_keys=[file_hash])
 
 
 class TagPrototype(Base):
@@ -229,7 +233,7 @@ class FileDateMention(Base):
         Index('ix_file_date_mentions_date_gran', 'mention_date', 'granularity'),
     )
 
-    # Link to files via the unique file hash (consistent with FileEmbedding / FileTagLabel)
+    # Link to files via the unique file hash (consistent with FileContent / FileTagLabel)
     file_hash     = Column(String, ForeignKey('files.hash'), primary_key=True)
     mention_date  = Column(Date, primary_key=True)           # normalized calendar date
     granularity   = Column(Text, primary_key=True, default='day')  # 'day' | 'month' | 'year'

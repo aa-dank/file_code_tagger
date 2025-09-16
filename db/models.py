@@ -243,3 +243,146 @@ class FileDateMention(Base):
     extracted_at  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     file = relationship("File", back_populates="date_mentions", foreign_keys=[file_hash])
+
+
+class PathPattern(Base):
+    __tablename__ = 'path_patterns'
+    id = Column(Integer, primary_key=True)
+    pattern = Column(String, nullable=False, unique=True)
+    pattern_type = Column(String, nullable=False)  # 'directory', 'file', or 'regex'
+    description = Column(Text, nullable=True)
+    treatment = Column(String, nullable=False)  # 'exclude', 'priority', 'special_processing', etc.
+    metadata = Column(JSONB, nullable=True)  # Additional treatment-specific parameters
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    @classmethod
+    def get_active_patterns(cls, session, treatment=None):
+        """
+        Get all enabled patterns, optionally filtered by treatment type.
+        
+        Args:
+            session: Database session
+            treatment: Optional treatment type filter
+            
+        Returns:
+            Dict of patterns organized by pattern_type
+        """
+        query = session.query(cls).filter_by(enabled=True)
+        if treatment:
+            query = query.filter_by(treatment=treatment)
+        
+        patterns = query.all()
+        result = {"directory": [], "file": [], "regex": []}
+        
+        for p in patterns:
+            pattern_type = p.pattern_type.lower()
+            if pattern_type not in result:
+                result[pattern_type] = []
+            
+            result[pattern_type].append({
+                'id': p.id,
+                'pattern': p.pattern,
+                'treatment': p.treatment,
+                'metadata': p.metadata
+            })
+            
+        return result
+    
+    @classmethod
+    def is_excluded(cls, session, path: str) -> bool:
+        """
+        Check if a path should be excluded based on active patterns.
+        
+        Args:
+            session: Database session
+            path: Path to check (normalized to forward slashes)
+            
+        Returns:
+            bool: True if path matches any active exclusion pattern
+        """
+        import fnmatch
+        import re
+        import os
+        
+        path = path.replace('\\', '/')
+        filename = os.path.basename(path)
+        
+        # Get all active exclusion patterns
+        patterns = cls.get_active_patterns(session, treatment='exclude')
+        
+        # Check directory exclusions
+        for p in patterns.get("directory", []):
+            if fnmatch.fnmatch(path, p['pattern']):
+                return True
+        
+        # Check file exclusions
+        for p in patterns.get("file", []):
+            if fnmatch.fnmatch(filename, p['pattern']):
+                return True
+        
+        # Check regex patterns
+        for p in patterns.get("regex", []):
+            try:
+                if re.search(p['pattern'], path):
+                    return True
+            except re.error:
+                # Log invalid regex pattern
+                logger.warning(f"Invalid regex pattern: {p['pattern']}")
+                continue
+                
+        return False
+    
+    @classmethod
+    def check_path_treatment(cls, session, path: str):
+        """
+        Check all treatments that apply to a path.
+        
+        Args:
+            session: Database session
+            path: Path to check
+            
+        Returns:
+            Dict of applicable treatments with matching pattern details
+        """
+        import fnmatch
+        import re
+        import os
+        
+        path = path.replace('\\', '/')
+        filename = os.path.basename(path)
+        
+        # Get all active patterns
+        all_patterns = cls.get_active_patterns(session)
+        matched_treatments = {}
+        
+        # Check directory patterns
+        for p in all_patterns.get("directory", []):
+            if fnmatch.fnmatch(path, p['pattern']):
+                treatment = p['treatment']
+                if treatment not in matched_treatments:
+                    matched_treatments[treatment] = []
+                matched_treatments[treatment].append(p)
+        
+        # Check file patterns
+        for p in all_patterns.get("file", []):
+            if fnmatch.fnmatch(filename, p['pattern']):
+                treatment = p['treatment']
+                if treatment not in matched_treatments:
+                    matched_treatments[treatment] = []
+                matched_treatments[treatment].append(p)
+        
+        # Check regex patterns
+        for p in all_patterns.get("regex", []):
+            try:
+                if re.search(p['pattern'], path):
+                    treatment = p['treatment']
+                    if treatment not in matched_treatments:
+                        matched_treatments[treatment] = []
+                    matched_treatments[treatment].append(p)
+            except re.error:
+                logger.warning(f"Invalid regex pattern: {p['pattern']}")
+                continue
+                
+        return matched_treatments

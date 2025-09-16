@@ -348,6 +348,7 @@ def _run_file_pipeline(
                         fc = FileContent(
                             file_hash=file_obj.hash,
                             source_text=text,
+                            text_length=len(text),
                             minilm_model=embedding_client.model_name,
                             minilm_emb=vec
                         )

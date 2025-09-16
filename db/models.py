@@ -117,6 +117,7 @@ class FileContent(Base):
     )
     file_hash = Column(String, ForeignKey('files.hash'), primary_key=True)
     source_text = Column(Text)
+    text_length = Column(Integer, comment="Length of the extracted text in characters.")
     minilm_model = Column(Text)
     minilm_emb = Column(Vector(384))
     mpnet_model = Column(Text)

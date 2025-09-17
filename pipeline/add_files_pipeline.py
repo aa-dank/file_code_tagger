@@ -289,7 +289,8 @@ def _run_file_pipeline(
     tesseract_cmd,
     text_length_threshold,
     locator_fn,
-    labeling_fn
+    labeling_fn,
+    apply_exclusions: bool = True
 ):
     """
     Core loop to process, extract, embed, and label a list of File ORM objects.
@@ -320,6 +321,12 @@ def _run_file_pipeline(
     - Normalizes and cleans text before embedding.
     - Commits each embedding and labeling operation immediately.
     """
+    # Lazy import to avoid circular imports
+    try:
+        from db.models import PathPattern  # type: ignore
+    except Exception:
+        PathPattern = None  # Fallback if model not available
+
     logger = logging.getLogger('add_files_pipeline')
     init_tesseract(tesseract_cmd)
     for idx, file_obj in enumerate(files, start=1):
@@ -331,6 +338,14 @@ def _run_file_pipeline(
         if not local_path or not filename:
             logger.warning(f"File hash {file_obj.hash} not found on server using the locator function.")
             continue
+        # Apply PathPattern-based exclusions if enabled and available
+        if apply_exclusions and PathPattern is not None:
+            try:
+                if PathPattern.is_excluded(session, str(local_path)):
+                    logger.info(f"Skipping excluded file: {local_path}")
+                    continue
+            except Exception as _exc:
+                logger.warning(f"PathPattern exclusion check failed for {local_path}: {_exc}")
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
                 temp_fp = os.path.join(temp_dir, filename)
@@ -372,7 +387,8 @@ def process_files_given_tag(
     exclude_embedded: bool = True,
     max_size_mb: Optional[float] = DEFAULT_MAX_SIZE_MB,
     text_length_threshold: int = DEFAULT_TEXT_LENGTH_THRESHOLD,
-    tesseract_cmd: Optional[str] = None
+    tesseract_cmd: Optional[str] = None,
+    apply_exclusions: bool = True
 ):
     """Main end-to-end pipeline: extract, embed, and label files for a filing tag.
 
@@ -418,7 +434,8 @@ def process_files_given_tag(
             tesseract_cmd,
             text_length_threshold,
             locator_fn=lambda _s, f, m: _locate_for_tag(f, m, tag),
-            labeling_fn=_label_for_tag
+            labeling_fn=_label_for_tag,
+            apply_exclusions=apply_exclusions
         )
 
 def process_files_given_file_server_location(
@@ -428,7 +445,8 @@ def process_files_given_file_server_location(
     exclude_embedded: bool = True,
     max_size_mb: Optional[float] = DEFAULT_MAX_SIZE_MB,
     text_length_threshold: int = DEFAULT_TEXT_LENGTH_THRESHOLD,
-    tesseract_cmd: Optional[str] = None
+    tesseract_cmd: Optional[str] = None,
+    apply_exclusions: bool = True
 ):
     """
     Main pipeline: extract, embed, and label files based on a server location.
@@ -469,5 +487,6 @@ def process_files_given_file_server_location(
             tesseract_cmd=tesseract_cmd,
             text_length_threshold=text_length_threshold,
             locator_fn=lambda _s, f, m: _locate_for_location(_s, f, m, target_dirs),
-            labeling_fn=_label_for_location
+            labeling_fn=_label_for_location,
+            apply_exclusions=apply_exclusions
         )

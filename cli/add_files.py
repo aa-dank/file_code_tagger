@@ -27,10 +27,12 @@ def cli():
 @click.option('--max-size-mb', default=150, show_default=True, type=float)
 @click.option('--threshold', default=250, show_default=True, help='Minimum text length to embed')
 @click.option('--tesseract-cmd', default=None, help='Path to tesseract executable')
+@click.option('--apply-exclusions/--ignore-exclusions', default=True, show_default=True,
+              help='Apply path exclusion patterns from the database')
 @click.option('--log-file', default='app.log', show_default=True, help='Log file path')
 @click.option('--log-level', default='INFO', show_default=True, type=click.Choice(['DEBUG','INFO','WARNING','ERROR','CRITICAL'], case_sensitive=False))
 def add_tag_files(
-    tag, mount, number, randomize, exclude_embedded, max_size_mb, threshold, tesseract_cmd, log_file, log_level
+    tag, mount, number, randomize, exclude_embedded, max_size_mb, threshold, tesseract_cmd, apply_exclusions, log_file, log_level
 ):
     """
     CLI tool to process and embed files for a given filing tag
@@ -60,7 +62,8 @@ def add_tag_files(
         exclude_embedded=exclude_embedded,
         max_size_mb=max_size_mb,
         text_length_threshold=threshold,
-        tesseract_cmd=tesseract_cmd
+        tesseract_cmd=tesseract_cmd,
+        apply_exclusions=apply_exclusions
     )
     cli_logger.info("Completed add_files processing.")
 
@@ -72,10 +75,12 @@ def add_tag_files(
 @click.option('--max-size-mb', default=150, show_default=True, type=float)
 @click.option('--threshold', default=250, show_default=True, help='Minimum text length to embed')
 @click.option('--tesseract-cmd', default=None, help='Path to tesseract executable')
+@click.option('--apply-exclusions/--ignore-exclusions', default=True, show_default=True,
+              help='Apply path exclusion patterns from the database')
 @click.option('--log-file', default='app.log', show_default=True, help='Log file path')
 @click.option('--log-level', default='INFO', show_default=True, type=click.Choice(['DEBUG','INFO','WARNING','ERROR','CRITICAL'], case_sensitive=False))
 def add_location_files(
-    location, mount, number, exclude_embedded, max_size_mb, threshold, tesseract_cmd, log_file, log_level
+    location, mount, number, exclude_embedded, max_size_mb, threshold, tesseract_cmd, apply_exclusions, log_file, log_level
 ):
     """
     CLI tool to process and embed files for a given server location
@@ -107,7 +112,8 @@ def add_location_files(
         exclude_embedded=exclude_embedded,
         max_size_mb=max_size_mb,
         text_length_threshold=threshold,
-        tesseract_cmd=tesseract_cmd
+        tesseract_cmd=tesseract_cmd,
+        apply_exclusions=apply_exclusions
     )
     cli_logger.info("Completed add_files processing.")
 

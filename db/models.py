@@ -2,6 +2,8 @@
 
 import logging
 import os
+import fnmatch
+import re
 from pathlib import Path, PurePosixPath
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, SmallInteger, Text, Boolean, Numeric, Index, Date
@@ -252,7 +254,7 @@ class PathPattern(Base):
     pattern_type = Column(String, nullable=False)  # 'directory', 'file', or 'regex'
     description = Column(Text, nullable=True)
     treatment = Column(String, nullable=False)  # 'exclude', 'priority', 'special_processing', etc.
-    metadata = Column(JSONB, nullable=True)  # Additional treatment-specific parameters
+    meta = Column('metadata', JSONB, nullable=True)
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -275,19 +277,19 @@ class PathPattern(Base):
         
         patterns = query.all()
         result = {"directory": [], "file": [], "regex": []}
-        
+
         for p in patterns:
             pattern_type = p.pattern_type.lower()
             if pattern_type not in result:
                 result[pattern_type] = []
-            
+
             result[pattern_type].append({
                 'id': p.id,
                 'pattern': p.pattern,
                 'treatment': p.treatment,
-                'metadata': p.metadata
+                'metadata': p.meta  # was p.metadata
             })
-            
+
         return result
     
     @classmethod
@@ -302,10 +304,7 @@ class PathPattern(Base):
         Returns:
             bool: True if path matches any active exclusion pattern
         """
-        import fnmatch
-        import re
-        import os
-        
+
         path = path.replace('\\', '/')
         filename = os.path.basename(path)
         
@@ -346,9 +345,6 @@ class PathPattern(Base):
         Returns:
             Dict of applicable treatments with matching pattern details
         """
-        import fnmatch
-        import re
-        import os
         
         path = path.replace('\\', '/')
         filename = os.path.basename(path)

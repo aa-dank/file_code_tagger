@@ -34,7 +34,7 @@ def extract_server_dirs(full_path: str | Path,
 
 def build_file_path(base_mount: str,
                     server_dir: str,
-                    filename: str) -> Path:
+                    filename: str = None) -> Path:
     """
     Join a server-relative path + filename onto a machine-specific
     mount-point.
@@ -58,8 +58,10 @@ def build_file_path(base_mount: str,
     rel_parts = PurePosixPath(server_dir).parts     # -> tuple of segments
 
     # 2) Let Path figure out the separator style of this machine
-    full_path = Path(base_mount).joinpath(*rel_parts, filename)
-
+    full_path = Path(base_mount).joinpath(*rel_parts)
+    if filename:
+        full_path = full_path / filename
+    
     return full_path
 
 def file_tag_prefix(file_tag:str) -> str:

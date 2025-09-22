@@ -11,7 +11,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from db.db import get_db_engine  # Import get_db_engine from db/db.py
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +71,6 @@ class FilingTag(Base):
     parent = relationship("FilingTag", remote_side=[label], back_populates="children")
     children = relationship("FilingTag", back_populates="parent")
     file_labels = relationship("FileTagLabel", back_populates="filing_tag")
-    prototypes = relationship(
-        "TagPrototype",
-        back_populates="filing_tag",
-        cascade="all, delete-orphan",
-        single_parent=True,
-        order_by="TagPrototype.prototype_id",
-    )
 
     @property
     def full_tag_label_str(self) -> str:
@@ -128,82 +120,12 @@ class FileContent(Base):
     file = relationship("File", back_populates="content", foreign_keys=[file_hash])
 
 
-class TagPrototype(Base):
-    __tablename__ = "tag_prototypes"
-    __table_args__ = (
-        Index(
-            "ix_tag_prototypes_embedding",
-            "embedding",
-            postgresql_using="ivfflat",
-            postgresql_ops={"embedding": "vector_cosine_ops"},
-            postgresql_with={"lists": 100},
-        ),
-    )
-    tag = Column(Text, ForeignKey("filing_tags.label", ondelete="CASCADE"), primary_key=True)
-    prototype_id = Column(SmallInteger, primary_key=True, default=0)
-    model_name   = Column(Text, nullable=False)
-    embedding    = Column(Vector(768), nullable=False)
-    doc_count    = Column(Integer)
-    updated_at   = Column(DateTime(timezone=True), server_default=func.now())
-    notes        = Column(Text, comment="Optional notes about the prototype.")
-    filing_tag = relationship("FilingTag", back_populates="prototypes")
-
-
-class PrototypeRun(Base):
-    __tablename__ = "prototype_runs"
-    run_id        = Column(Integer, primary_key=True)
-    model_name    = Column(Text, nullable=False)
-    model_version = Column(Text, nullable=False)
-    algorithm     = Column(Text, nullable=False)
-    hyperparams   = Column(JSONB, nullable=True)
-    tag_filter    = Column(Text, nullable=True)
-    created_at    = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    members = relationship(
-        "PrototypeMember",
-        back_populates="run",
-        cascade="all, delete-orphan"
-    )
-    metrics = relationship(
-        "PrototypeRunMetric",
-        back_populates="run",
-        cascade="all, delete-orphan"
-    )
-
-
-class PrototypeMember(Base):
-    __tablename__ = "prototype_members"
-    run_id = Column(Integer, ForeignKey("prototype_runs.run_id", ondelete="CASCADE"), primary_key=True)
-    tag = Column(Text, ForeignKey("filing_tags.label", ondelete="CASCADE"), primary_key=True)
-    prototype_id = Column(SmallInteger, primary_key=True, default=0)
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), primary_key=True)
-    run = relationship("PrototypeRun", back_populates="members")
-    filing_tag = relationship("FilingTag")
-    file = relationship("File")
-    __table_args__ = (
-        Index(
-            "ix_prototype_members_run_tag_pid",
-            "run_id",
-            "tag",
-            "prototype_id",
-        ),
-    )
-
-
-class PrototypeRunMetric(Base):
-    __tablename__ = "prototype_run_metrics"
-    run_id = Column(Integer, ForeignKey("prototype_runs.run_id", ondelete="CASCADE"), primary_key=True)
-    metric_name = Column(Text, primary_key=True)
-    split = Column(Text, primary_key=True)
-    value = Column(Numeric)
-    computed_at = Column(DateTime(timezone=True), server_default=func.now())
-    run = relationship("PrototypeRun", back_populates="metrics")
-
-
 class FileCollection(Base):
     __tablename__ = 'file_collections'
     id          = Column(Integer, primary_key=True)
     name        = Column(Text, nullable=False, unique=True)
-    description = Column(Text, comment="Human-friendly notes about this collection")
+    description = Column(Text, comment="Human-readable description of the collection.", nullable=True)
+    metadata    = Column(JSONB, nullable=True)
     created_at  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     members = relationship(
         "FileCollectionMember",

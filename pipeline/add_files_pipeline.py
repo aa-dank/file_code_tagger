@@ -338,14 +338,15 @@ def _run_file_pipeline(
         if not local_path or not filename:
             logger.warning(f"File hash {file_obj.hash} not found on server using the locator function.")
             continue
-        # Apply PathPattern-based exclusions if enabled and available
+        # Exclude from embedding based on dedicated context
         if apply_exclusions and PathPattern is not None:
             try:
-                if PathPattern.is_excluded(session, str(local_path)):
-                    logger.info(f"Skipping excluded file: {local_path}")
+                if PathPattern.is_excluded(session, str(local_path), context='add_files_embedding'):
+                    logger.info(f"Skipping embedding for excluded file: {local_path}")
                     continue
             except Exception as _exc:
                 logger.warning(f"PathPattern exclusion check failed for {local_path}: {_exc}")
+
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
                 temp_fp = os.path.join(temp_dir, filename)
@@ -370,7 +371,12 @@ def _run_file_pipeline(
                         session.add(fc)
                         session.commit()
                         logger.info(f"Embedded file {file_obj.hash} with {embedding_client.model_name}")
-                        labeling_fn(session, file_obj, extra)
+                        # Apply tagging only if not excluded for tagging context
+                        if not (apply_exclusions and PathPattern is not None and
+                                PathPattern.is_excluded(session, str(local_path), context='add_files_tagging')):
+                            labeling_fn(session, file_obj, extra)
+                        else:
+                            logger.info(f"Skipping tagging for excluded file: {local_path}")
                     else:
                         logger.warning(f"Embedding failed for {file_obj.hash}")
                 else:

@@ -125,7 +125,7 @@ class FileCollection(Base):
     id          = Column(Integer, primary_key=True)
     name        = Column(Text, nullable=False, unique=True)
     description = Column(Text, comment="Human-readable description of the collection.", nullable=True)
-    metadata    = Column(JSONB, nullable=True)
+    meta    = Column('metadata', JSONB, nullable=True)
     created_at  = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     members = relationship(
         "FileCollectionMember",
@@ -171,88 +171,67 @@ class FileDateMention(Base):
 
 class PathPattern(Base):
     __tablename__ = 'path_patterns'
-    id = Column(Integer, primary_key=True)
-    pattern = Column(String, nullable=False, unique=True)
-    pattern_type = Column(String, nullable=False)  # 'directory', 'file', or 'regex'
-    description = Column(Text, nullable=True)
-    treatment = Column(String, nullable=False)  # 'exclude', 'priority', 'special_processing', etc.
-    meta = Column('metadata', JSONB, nullable=True)
-    enabled = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+    id           = Column(Integer,   primary_key=True)
+    pattern      = Column(String,    nullable=False, unique=True)
+    pattern_type = Column(String,    nullable=False)  # 'directory','file','regex'
+    description  = Column(Text,      nullable=True)
+    treatment    = Column(String,    nullable=False)  # 'exclude','priority',...
+    meta         = Column('metadata', JSONB,         nullable=True)
+    contexts     = Column(JSONB,     nullable=True)   # e.g. ['add_files','date_mentions']
+    enabled      = Column(Boolean,   default=True)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at   = Column(DateTime(timezone=True),
+                           server_default=func.now(),
+                           onupdate=func.now())
+
     @classmethod
-    def get_active_patterns(cls, session, treatment=None):
-        """
-        Get all enabled patterns, optionally filtered by treatment type.
-        
-        Args:
-            session: Database session
-            treatment: Optional treatment type filter
-            
-        Returns:
-            Dict of patterns organized by pattern_type
-        """
-        query = session.query(cls).filter_by(enabled=True)
+    def get_active_patterns(cls, session, treatment=None, context=None):
+        """Return only enabled patterns, filtered by treatment and (optional) context."""
+        q = session.query(cls).filter_by(enabled=True)
         if treatment:
-            query = query.filter_by(treatment=treatment)
-        
-        patterns = query.all()
-        result = {"directory": [], "file": [], "regex": []}
+            q = q.filter(cls.treatment == treatment)
+        if context:
+            # include patterns with no contexts (global) or that list this context
+            q = q.filter(
+                or_(
+                  cls.contexts == None,
+                  cls.contexts.contains([context])
+                )
+            )
+        rows = q.all()
 
-        for p in patterns:
-            pattern_type = p.pattern_type.lower()
-            if pattern_type not in result:
-                result[pattern_type] = []
+        out = {'directory': [], 'file': [], 'regex': []}
+        for r in rows:
+            t = r.pattern_type.lower()
+            if t in out:
+                out[t].append({'pattern': r.pattern})
+        return out
 
-            result[pattern_type].append({
-                'id': p.id,
-                'pattern': p.pattern,
-                'treatment': p.treatment,
-                'metadata': p.meta  # was p.metadata
-            })
-
-        return result
-    
     @classmethod
-    def is_excluded(cls, session, path: str) -> bool:
-        """
-        Check if a path should be excluded based on active patterns.
-        
-        Args:
-            session: Database session
-            path: Path to check (normalized to forward slashes)
-            
-        Returns:
-            bool: True if path matches any active exclusion pattern
-        """
+    def is_excluded(cls,
+                    session,
+                    path: str,
+                    context: str | None = None) -> bool:
+        """Skip if any enabled ‘exclude’ pattern matches for this context."""
+        import fnmatch, re, os
+        path = path.replace('\\','/')
+        name = os.path.basename(path)
 
-        path = path.replace('\\', '/')
-        filename = os.path.basename(path)
-        
-        # Get all active exclusion patterns
-        patterns = cls.get_active_patterns(session, treatment='exclude')
-        
-        # Check directory exclusions
-        for p in patterns.get("directory", []):
-            if fnmatch.fnmatch(path, p['pattern']):
+        pats = cls.get_active_patterns(session,
+                                       treatment='exclude',
+                                       context=context)
+        for d in pats['directory']:
+            if fnmatch.fnmatch(path, d['pattern']):
                 return True
-        
-        # Check file exclusions
-        for p in patterns.get("file", []):
-            if fnmatch.fnmatch(filename, p['pattern']):
+        for f in pats['file']:
+            if fnmatch.fnmatch(name, f['pattern']):
                 return True
-        
-        # Check regex patterns
-        for p in patterns.get("regex", []):
+        for r in pats['regex']:
             try:
-                if re.search(p['pattern'], path):
+                if re.search(r['pattern'], path):
                     return True
             except re.error:
-                # Log invalid regex pattern
-                logger.warning(f"Invalid regex pattern: {p['pattern']}")
-                continue
-                
+                logger.warning(f"bad regex {r['pattern']}")
         return False
     
     @classmethod

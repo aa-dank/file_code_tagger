@@ -6,7 +6,7 @@ import fnmatch
 import re
 from pathlib import Path, PurePosixPath
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, SmallInteger, Text, Boolean, Numeric, Index, Date
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, BigInteger, Text, Boolean, Numeric, Index, Date, or_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship

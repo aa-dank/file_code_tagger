@@ -68,6 +68,17 @@ dmypy.json
 *.db
 *.sqlite3
 
+# Spreadsheet files
+*.xlsx
+*.xls
+*.csv
+*.ods
+*.tsv
+*.numbers
+*.gnumeric
+*.fods
+
+
 # OS generated files
 .DS_Store
 .DS_Store?

@@ -5,19 +5,26 @@ from pathlib import Path, PurePosixPath
 logger = logging.getLogger(__name__)
 
 def extract_server_dirs(full_path: str | Path,
-                       base_mount: str | Path) -> str:
+                       base_mount: str | Path,
+                       include_filename: bool = False) -> str:
     """
+    Extract the server directory path (and optionally filename) relative to a mount point.
+
     Parameters
     ----------
     full_path   Absolute path on the client machine
-                e.g. r"N:\\PPDO\\Records\\49xx   Long Marine Lab\\4932\\..."
+                e.g. r"N:\\PPDO\\Records\\49xx   Long Marine Lab\\4932\\file.pdf"
     base_mount  The local mount-point for the records share
                 e.g. r"N:\\PPDO\\Records"   or   "/mnt/records"
+    include_filename : bool, default False
+                Whether to include the filename in the returned path.
+                If False, only returns the directory structure.
 
     Returns
     -------
     str   --  value suitable for file_locations.file_server_directories
               (always forward-slash separators, no leading slash)
+              If include_filename=False, excludes the filename component.
     """
     # Normalise to platform-aware Path objects
     full = Path(full_path).expanduser().resolve()
@@ -29,7 +36,12 @@ def extract_server_dirs(full_path: str | Path,
     except ValueError:               # not under base_mount
         raise ValueError(f"{full} is not under {base}")
 
-    # 2) Convert to POSIX form (forces forward slashes)
+    # 2) If include_filename is False, exclude the filename (last part)
+    if not include_filename and rel_parts.parts:
+        # Remove the last part (filename) if it exists
+        rel_parts = Path(*rel_parts.parts[:-1]) if len(rel_parts.parts) > 1 else Path()
+
+    # 3) Convert to POSIX form (forces forward slashes)
     return str(PurePosixPath(rel_parts))
 
 def build_file_path(base_mount: str,

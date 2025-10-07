@@ -1,5 +1,7 @@
 import hashlib
 import logging
+import numpy as np
+from numpy.linalg import norm
 from pathlib import Path, PurePosixPath
 
 logger = logging.getLogger(__name__)
@@ -116,3 +118,16 @@ def bytes_in_mb(bytes_size: int) -> float:
         Size in megabytes.
     """
     return bytes_size / (1024 * 1024) if bytes_size else 0.0
+
+def cosine_similarity(a, b):
+    """
+    Compute cosine similarity between two vectors safely.
+    Vectorized when possible, but avoids div/0 errors.
+    """
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    na = np.linalg.norm(a)
+    nb = np.linalg.norm(b)
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return float(np.dot(a, b) / (na * nb))

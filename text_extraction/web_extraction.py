@@ -1,4 +1,4 @@
-# extracting/web_extractor.py
+# text_extraction/web_extractor.py
 
 import email
 import logging

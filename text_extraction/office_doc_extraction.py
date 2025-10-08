@@ -1,4 +1,4 @@
-# extracting/msft_extractor.py
+# text_extraction/msft_extractor.py
 
 import io
 import logging

@@ -1,4 +1,4 @@
-# extracting/pdf_extractor.py
+# text_extraction/pdf_extractor.py
 
 import fitz
 import logging

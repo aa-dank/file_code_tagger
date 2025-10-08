@@ -1,4 +1,4 @@
-# extracting/extractors.py
+# text_extraction/extractors.py
 
 import httpx
 import logging

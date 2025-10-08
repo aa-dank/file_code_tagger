@@ -1,21 +1,13 @@
-# knn/knn.py
+# knn/base.py
+
 import datetime
 from dataclasses import dataclass
-from db.models import FileCollection
 
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field, asdict
 
 @dataclass
-class KNNRun:
-    k: int
-    name: str
-    description: str
-    training_collection: FileCollection
-    test_collection: FileCollection
-
-@dataclass
-class CollectionProvenance:
+class KNNCollectionProvenance:
     purpose: str
     parents: List[str]
     strategy: str

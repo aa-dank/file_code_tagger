@@ -1,4 +1,4 @@
-# extracting/image_extractor.py
+# text_extraction/image_extractor.py
 import logging
 import pytesseract
 import re

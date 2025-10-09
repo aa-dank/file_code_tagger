@@ -1,45 +1,55 @@
 # knn/base.py
 
-import datetime
-from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Dict, Any
+import numpy as np
 
-@dataclass
-class KNNCollectionProvenance:
+
+def cosine_similarity(a, b):
     """
-    Describes the setup context for a set of FileCollections used in a KNN evaluation run.
-    Intended for storage in FileCollection.meta.
+    Compute cosine similarity between two vectors safely.
+    Vectorized when possible, but avoids div/0 errors.
     """
-    purpose: str
-    split_strategy: str                  # class or function name
-    embedding_column: str
-    parents: List[str]
-    split_ratio: float
-    random_seed: Optional[int] = None
-    extra_params: Dict[str, Any] = field(default_factory=dict)
-    created_utc: str = field(default_factory=lambda: datetime.datetime.utcnow().isoformat() + "Z")
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    na = np.linalg.norm(a)
+    nb = np.linalg.norm(b)
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return float(np.dot(a, b) / (na * nb))
 
-    def to_metadata(self) -> Dict[str, Any]:
-        """Return dict suitable for FileCollection.meta"""
-        return {
-            "provenance": asdict(self),
-            "counts": {},  # will be populated later
-        }
+def cosine_similarity_batch(query_vec, matrix):
+    """
+    Compute cosine similarity between a single vector and multiple vectors.
 
-    def to_description(self) -> str:
-        train_pct = int(self.split_ratio * 100)
-        test_pct = 100 - train_pct
-        return f"""# Collection purpose
-{self.purpose}
+    Parameters
+    ----------
+    query_vec : array-like, shape (d,)
+        Single query vector
+    matrix : array-like, shape (n, d) 
+        Matrix where each row is a vector to compare against
 
-# Creation details
-- Created: {self.created_utc}
-- Split strategy: {self.split_strategy}
-- Embedding column: {self.embedding_column}
-- Parent tags: {', '.join(self.parents)}
-- Train/Test split: {train_pct}/{test_pct}
-- Random seed: {self.random_seed or 'None'}
+    Returns
+    -------
+    np.ndarray, shape (n,)
+        Cosine similarities between query_vec and each row of matrix
+    """
+    query_vec = np.asarray(query_vec, dtype=float)
+    matrix = np.asarray(matrix, dtype=float)
 
-# Notes
-{self.extra_params.get('notes', '') if self.extra_params else ''}
-"""
+    # Normalize query vector
+    query_norm = np.linalg.norm(query_vec)
+    if query_norm == 0.0:
+        return np.zeros(matrix.shape[0])
+
+    # Normalize matrix rows
+    matrix_norms = np.linalg.norm(matrix, axis=1)
+    zero_mask = matrix_norms == 0.0
+
+    # Compute dot products
+    dots = np.dot(matrix, query_vec)
+
+    # Compute cosine similarities, handling zero norms
+    sims = np.zeros(matrix.shape[0])
+    valid_mask = ~zero_mask
+    sims[valid_mask] = dots[valid_mask] / (matrix_norms[valid_mask] * query_norm)
+
+    return sims

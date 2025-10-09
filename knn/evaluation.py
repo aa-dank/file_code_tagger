@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 from typing import List, Tuple
 
+from .base import KNNCollectionProvenance
 from db.models import FileCollection
 
 
@@ -30,6 +31,24 @@ class SplitSelectionStrategy(ABC):
         """Return (train_ids, test_ids)."""
         raise NotImplementedError
 
+    def assemble_provenance_info(self, parents: List[str], embedding_col: str, split_ratio: float, per_child_cap: int, random_seed: int) -> KNNCollectionProvenance:
+        """Return the provenance information for this split strategy."""
+        extra_params = {
+            "per_child_cap": per_child_cap,
+            "notes": f"Split strategy: {self.description}"
+        }
+        
+        prov = KNNCollectionProvenance(
+            purpose=f"KNN evaluation run using {self.name}",
+            split_strategy=self.name,
+            embedding_column=embedding_col,
+            parents=parents,
+            split_ratio=split_ratio,
+            random_seed=random_seed,
+            extra_params=extra_params
+        )
+        
+        return prov
 
 class NeighborFilterStrategy(ABC):
     """
@@ -48,7 +67,7 @@ class NeighborFilterStrategy(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def filter(self, session: Session, candidate_ids: List[int], test_file_id: int) -> List[int]:
+    def filter(self,  test_file_hash: int, session: Session = None, candidate_ids: List[int] = []) -> List[int]:
         """Return subset of candidate_ids allowed for this test file."""
         raise NotImplementedError
 
@@ -70,7 +89,7 @@ class LabelingStrategy(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def infer_label(self, neighbor_tags: List[str], neighbor_scores: List[float], filepath: str = None) -> str:
+    def infer_label(self, neighbor_tags: List[str], neighbor_scores: List[float], test_file_hash: str = None) -> str:
         raise NotImplementedError
 
 

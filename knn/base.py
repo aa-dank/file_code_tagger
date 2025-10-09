@@ -1,42 +1,45 @@
 # knn/base.py
 
 import datetime
-from dataclasses import dataclass
-
-from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field, asdict
+from typing import List, Optional, Dict, Any
 
 @dataclass
 class KNNCollectionProvenance:
+    """
+    Describes the setup context for a set of FileCollections used in a KNN evaluation run.
+    Intended for storage in FileCollection.meta.
+    """
     purpose: str
-    parents: List[str]
-    strategy: str
+    split_strategy: str                  # class or function name
     embedding_column: str
+    parents: List[str]
     split_ratio: float
-    per_child_cap: int
-    filetype_filter: Optional[List[str]] = field(default_factory=list)
-    include_descendants: bool = True
     random_seed: Optional[int] = None
-    created_utc: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    extra_params: Dict[str, Any] = field(default_factory=dict)
+    created_utc: str = field(default_factory=lambda: datetime.datetime.utcnow().isoformat() + "Z")
 
     def to_metadata(self) -> Dict[str, Any]:
-        return {"provenance": asdict(self), "counts": {}}
+        """Return dict suitable for FileCollection.meta"""
+        return {
+            "provenance": asdict(self),
+            "counts": {},  # will be populated later
+        }
 
     def to_description(self) -> str:
         train_pct = int(self.split_ratio * 100)
         test_pct = 100 - train_pct
-        ft = ", ".join(self.filetype_filter) if self.filetype_filter else "all"
         return f"""# Collection purpose
 {self.purpose}
 
 # Creation details
 - Created: {self.created_utc}
-- Parents: {", ".join(self.parents)}
-- Strategy: {self.strategy}
-- Embedding: {self.embedding_column}
-- Split: {train_pct}/{test_pct}
-- Per-child cap: {self.per_child_cap}
-- Descendants: {self.include_descendants}
-- Filetypes: {ft}
-- Seed: {self.random_seed}
+- Split strategy: {self.split_strategy}
+- Embedding column: {self.embedding_column}
+- Parent tags: {', '.join(self.parents)}
+- Train/Test split: {train_pct}/{test_pct}
+- Random seed: {self.random_seed or 'None'}
+
+# Notes
+{self.extra_params.get('notes', '') if self.extra_params else ''}
 """

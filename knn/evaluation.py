@@ -1,9 +1,11 @@
 # knn\evaluation.py
 
+
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from sqlalchemy.orm import Session
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 from db.models import FileCollection
 
@@ -21,7 +23,7 @@ class KNNCollectionProvenance:
     split_ratio: float
     random_seed: Optional[int] = None
     extra_params: Dict[str, Any] = field(default_factory=dict)
-    created_utc: str = field(default_factory=lambda: datetime.datetime.utcnow().isoformat() + "Z")
+    created_utc: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
 
     def to_metadata(self) -> Dict[str, Any]:
         """Return dict suitable for FileCollection.meta"""

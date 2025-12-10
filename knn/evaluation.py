@@ -17,7 +17,7 @@ class KNNCollectionProvenance:
     Intended for storage in FileCollection.meta.
     """
     purpose: str
-    split_strategy: str                  # class or function name
+    split_strategy: str
     embedding_column: str
     parents: List[str]
     split_ratio: float

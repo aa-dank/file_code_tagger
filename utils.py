@@ -45,7 +45,7 @@ def extract_server_dirs(full_path: str | Path,
     # 3) Convert to POSIX form (forces forward slashes)
     return str(PurePosixPath(rel_parts))
 
-def build_file_path(base_mount: str,
+def assemble_file_server_filepath(base_mount: str,
                     server_dir: str,
                     filename: str = None) -> Path:
     """

@@ -1,0 +1,43 @@
+[project]
+name = "file-code-tagger"
+version = "0.1.0"
+description = "Index files from a Windows-mounted records share, extract text, embed vectors, and enrich metadata in PostgreSQL with pgvector"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "click>=8.3.1",
+    "ipykernel>=7.1.0",
+    "ipython>=9.9.0",
+    "ipywidgets>=8.1.8",
+    "jupyter>=1.1.1",
+    "jupyterlab>=4.5.2",
+    "lxml>=6.0.2",
+    "mammoth>=1.11.0",
+    "markdown>=3.10",
+    "matplotlib>=3.10.8",
+    "ocrmypdf>=16.13.0",
+    "odfpy>=1.4.1",
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.3",
+    "pgvector>=0.4.2",
+    "pillow>=12.1.0",
+    "plotly>=6.5.1",
+    "psycopg>=3.3.2",
+    "pymupdf>=1.26.7",
+    "pytesseract>=0.3.13",
+    "python-docx>=1.2.0",
+    "python-dotenv>=1.2.1",
+    "python-pptx>=1.0.2",
+    "pywin32>=311",
+    "pyxlsb>=1.0.10",
+    "seaborn>=0.13.2",
+    "sentence-transformers>=5.2.0",
+    "sqlalchemy>=2.0.45",
+    "striprtf>=0.0.29",
+    "torch>=2.9.1",
+    "tqdm>=4.67.1",
+    "transformers>=4.57.3",
+    "unidecode>=1.4.0",
+    "xlrd>=2.0.2",
+]

@@ -33,6 +33,7 @@ class HtmlTextExtractor(FileTextExtractor):
     _extract_from_mhtml(path: Path) -> str
         Extract HTML content from an MHTML file.
     """
+    # Extensions are lowercase, no leading dot (as per spec)
     file_extensions: List[str] = ["html", "htm", "mhtml", "mht"]
 
     def __init__(self, parser: str = "lxml"):
@@ -125,6 +126,7 @@ class EmailTextExtractor(FileTextExtractor):
     __call__(path: str) -> str
         Extract text content from the given email file.
     """
+    # Extensions are lowercase, no leading dot (as per spec)
     file_extensions: List[str] = ["eml", "msg"]
 
     def __init__(self, parser: str = "lxml"):

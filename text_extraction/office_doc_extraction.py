@@ -22,6 +22,7 @@ class WordFileTextExtractor(FileTextExtractor):
     - DOC/RTF:   convert via Word COM to TXT (fast, reliable) then read
                  (fallback to pandoc or striprtf if Word isn't installed)
     """
+    # Extensions are lowercase, no leading dot (as per spec)
     file_extensions: List[str] = ["docx", "docm", "doc", "rtf"]
 
     def __init__(self, use_mammoth: bool = True, use_word_com: bool = True,
@@ -182,7 +183,7 @@ class SpreadsheetTextExtractor(FileTextExtractor):
     """
     Flatten spreadsheet content into plain text for embedding.
     """
-
+    # Extensions are lowercase, no leading dot (as per spec)
     file_extensions: List[str] = ["xlsx", "xlsm", "xls", "xlsb", "ods", "csv", "tsv"]
 
     def __init__(self,
@@ -378,6 +379,7 @@ class PresentationTextExtractor(FileTextExtractor):
     - For pptx/pptm/ppsx: python-pptx
     - For ppt/pps/odp:    convert → pptx or txt via COM or LibreOffice, then parse
     """
+    # Extensions are lowercase, no leading dot (as per spec)
     file_extensions: List[str] = ["pptx", "pptm", "ppsx", "ppt", "pps", "odp"]
 
     def __init__(self,

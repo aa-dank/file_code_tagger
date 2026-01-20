@@ -27,6 +27,7 @@ class ImageTextExtractor(FileTextExtractor):
     
     Supports: PNG, JPG/JPEG, TIFF, BMP, GIF (first frame), HEIC (if pillow-heif installed).
     """
+    # Extensions are lowercase, no leading dot (as per spec)
     file_extensions: List[str] = ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif"]
 
     def __init__(self,

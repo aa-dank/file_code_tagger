@@ -214,7 +214,6 @@ class PDFTextExtractor(FileTextExtractor):
         """
         super().__init__()
         self.ocr_params = {
-            'max_image_mpixels': 250,
             'rotate_pages': True,
             'deskew': True,
             'invalidate_digital_signatures': True,
